@@ -250,6 +250,7 @@ export function serializeEnv(values) {
   const lines = [
     '# Socialbrewery server settings.',
     '# Organisation keys (AI, networks, connector) are not here: they are encrypted per organisation.',
+    '# Variables set on the process (a service manager, a hosting dashboard) override the values below.',
     '',
   ];
   for (const field of SYSTEM_FIELDS) {
@@ -372,15 +373,19 @@ async function readEnvValues() {
   }
 }
 
+// Variables already set on the process (a service manager, a hosting dashboard) win over .env.
 export async function loadEnv() {
   await fs.mkdir(path.dirname(envFile), { recursive: true });
   const parsed = await readEnvValues();
-  const values = { ...systemDefaults(), ...parsed };
-  if (SYSTEM_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(parsed, field.key))) await writeEnv(values);
-  for (const [key, value] of Object.entries(values)) {
+  const fileValues = { ...systemDefaults(), ...parsed };
+  if (SYSTEM_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(parsed, field.key))) await writeEnv(fileValues);
+  const values = { ...fileValues };
+  for (const [key, value] of Object.entries(fileValues)) {
     if (BLOCKED.has(key) || ORG_KEYS.has(key)) continue;
-    if (value) process.env[key] = value;
+    if (process.env[key]) values[key] = process.env[key];
+    else if (value) process.env[key] = value;
   }
+  for (const field of SYSTEM_FIELDS) if (process.env[field.key]) values[field.key] = process.env[field.key];
   return values;
 }
 

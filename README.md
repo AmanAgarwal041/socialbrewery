@@ -34,9 +34,58 @@ Until one is set, the sign-in page shows these steps and the exact callback URLs
 
 Organisation settings and account tokens are encrypted with AES-256-GCM under a master key, bound to the organisation they belong to. The key comes from `SOCIALBREWERY_MASTER_KEY` (32 random bytes, base64) or, if that is unset, from `.master.key`, which is created next to `.env` on first start. **Back it up**: without it, stored keys and tokens cannot be read. Saved secrets are never sent back to the browser; Settings shows them as "Saved, encrypted", and you replace or remove them.
 
-### Serving it to a team
+### Deploy on Cloudflare Workers (Containers)
 
-Set `HOST=0.0.0.0`, `APP_URL=https://your-domain`, and put the app behind HTTPS (a reverse proxy or a tunnel). Sign-in cookies are marked `Secure` when `APP_URL` is https, and the server warns at start if it is reachable over plain http. Every OAuth redirect URI (sign-in and networks) starts with `APP_URL`.
+`wrangler.jsonc` deploys a small Worker (`worker/index.js`) that forwards every request to one [Cloudflare Container](https://developers.cloudflare.com/containers/) running the Node app. The container's data folder, `/data`, is an R2 bucket mounted with FUSE ([tigrisfs](https://developers.cloudflare.com/containers/examples/r2-fuse-mount/)), so users, organisations, encrypted keys, posts, and videos survive restarts and redeploys. The `Dockerfile` is only for this image: Cloudflare builds and runs it, you do not host Docker yourself.
+
+Needs a Workers Paid plan and Docker running on the machine that runs `wrangler deploy` (it builds the image there).
+
+1. `npm install` (installs Wrangler; the app itself still has no runtime dependencies).
+2. Create the bucket: `npx wrangler r2 bucket create socialbrewery-data`. In the dashboard, under R2 → Manage API tokens, create a token with **Object Read & Write** on that bucket only.
+3. In `wrangler.jsonc`, set `APP_URL` (your `https://socialbrewery.<subdomain>.workers.dev` URL or custom domain) and `R2_ACCOUNT_ID`.
+4. Add the secrets:
+   ```bash
+   npx wrangler secret put SOCIALBREWERY_MASTER_KEY   # openssl rand -base64 32, and keep a copy
+   npx wrangler secret put R2_ACCESS_KEY_ID
+   npx wrangler secret put R2_SECRET_ACCESS_KEY
+   npx wrangler secret put GITHUB_AUTH_CLIENT_ID       # and/or the GOOGLE_AUTH_* pair
+   npx wrangler secret put GITHUB_AUTH_CLIENT_SECRET
+   ```
+5. `npm run cf:deploy`. The first deploy takes a few minutes to provision the container. Until every required value is set, the Worker answers with a list of what is missing.
+6. Point the sign-in and network OAuth apps at redirect URIs that start with `APP_URL`.
+
+How it behaves:
+
+- Exactly one container runs (`max_instances: 1`), because the app stores files. It sleeps after 30 minutes without requests and starts again on the next one (a few seconds); webhooks wake it too. On sleep or redeploy the app finishes its pending writes before R2 is unmounted.
+- R2 through FUSE is slower than a local disk, which is fine for JSON files and occasional videos.
+- Cloudflare's 100 MB request body limit applies to video uploads. Grok runs stay open with a keepalive every 20 seconds.
+- Without `SOCIALBREWERY_MASTER_KEY` the encrypted data cannot be read after a restart, so the Worker refuses to start the app until it is set.
+
+### Deploy with Cloudflare Tunnel
+
+Socialbrewery runs on any machine with Node.js 20 (a VM, a home server, a Mac). Cloudflare Tunnel puts it on your domain over HTTPS without opening a port: `cloudflared` connects out to Cloudflare, and the app keeps listening on `127.0.0.1`.
+
+1. Install `cloudflared` (`brew install cloudflared`, or see [Cloudflare's downloads](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)) and log in: `cloudflared tunnel login`.
+2. Create the tunnel and its DNS record:
+   ```bash
+   cloudflared tunnel create socialbrewery
+   cloudflared tunnel route dns socialbrewery brew.example.com
+   ```
+3. Copy `cloudflare/config.example.yml` to `cloudflare/config.yml` (git-ignored) and fill in the tunnel ID, credentials file, and hostname.
+4. In `.env`, keep `HOST=127.0.0.1` and set `APP_URL=https://brew.example.com`. Update every OAuth app (sign-in and networks) to redirect URIs that start with that URL; the sign-in page and each Connection tab show them.
+5. Start both, each under a service manager (launchd, systemd, pm2) so they come back after a reboot:
+   ```bash
+   npm start
+   npm run tunnel
+   ```
+
+With an https `APP_URL`, sign-in cookies are `Secure`, the Grok connector and Instagram use that URL directly (no `MCP_PUBLIC_URL` needed), and the Instagram webhook callback URL is ready for Meta. Variables set on the process override `.env`, so a service manager can supply `APP_URL` and the sign-in keys instead.
+
+Limits to know:
+
+- Cloudflare accepts request bodies up to 100 MB on the Free and Pro plans, so larger video uploads fail at Cloudflare even though the app allows 200 MB. Long Grok runs are kept open with a keepalive every 20 seconds, under Cloudflare's 100-second idle limit.
+- Run one copy of the app. Data lives on the machine's disk, so it cannot run on Cloudflare Workers or Pages, or on several machines at once.
+- Back up the data folder and the master key together (see below).
 
 ## Dashboard
 
@@ -105,6 +154,8 @@ If a Google test app is left in testing mode, the refresh token expires after 7 
 | `data/orgs/<id>/token-<network>.json` | Connected account tokens, encrypted |
 | `data/orgs/<id>/media/` | Attached and generated videos |
 | `data/orgs/<id>/posts.json`, `history.json`, `analyses.json` | Posts, Grok chat, performance reviews |
+
+Everything lives in one folder: the app directory, or `SOCIALBREWERY_HOME` when that is set (on Cloudflare Containers, the R2 bucket mounted at `/data`). Back up that whole folder, including `.master.key` (or keep `SOCIALBREWERY_MASTER_KEY` somewhere safe); the encrypted files are useless without the key.
 
 Instagram fetches Reels through short-lived signed links (`/public/media/...`, valid for 2 hours); everything else under `/api` needs a signed-in member of the organisation.
 

@@ -1,0 +1,12 @@
+# Cloudflare Tunnel for Socialbrewery. Copy to cloudflare/config.yml (git-ignored) and fill in
+# the tunnel ID and credentials path printed by `cloudflared tunnel create socialbrewery`.
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: brew.example.com
+    service: http://127.0.0.1:3847
+    originRequest:
+      # Keep the public hostname so sign-in, CSRF checks, and OAuth redirects match APP_URL.
+      httpHostHeader: brew.example.com
+  - service: http_status:404

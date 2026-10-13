@@ -35,7 +35,7 @@ import { cfg, currentContext, isOrgId, runWithOrg } from './context.js';
 import { verifySignature } from './secure.js';
 import { runAgent } from './agent.js';
 import { publicDir } from './paths.js';
-import { clearHistory, createMedia, ensureData, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
+import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
 import { analyzeVideo } from './analysis.js';
 import { connectorDetails, connectorTokenFrom, handleRpc } from './mcp.js';
 import {
@@ -1210,6 +1210,7 @@ async function orgRoute(req, res, url, ctx) {
     const controller = new AbortController();
     req.on('aborted', () => controller.abort());
     let started = false;
+    let heartbeat = null;
     const send = (event, data) => {
       if (!started || res.writableEnded || controller.signal.aborted) return;
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -1222,6 +1223,10 @@ async function orgRoute(req, res, url, ctx) {
         'X-Accel-Buffering': 'no',
       });
       started = true;
+      // Proxies such as Cloudflare drop a response that stays silent for about 100 seconds; clip generation takes longer.
+      heartbeat = setInterval(() => {
+        if (!res.writableEnded) res.write(': keepalive\n\n');
+      }, 20000);
       await runAgent({
         text,
         mediaId,
@@ -1235,6 +1240,7 @@ async function orgRoute(req, res, url, ctx) {
       if (!started) throw err;
       send('error', { error: err.message || 'Grok could not finish that.' });
     } finally {
+      clearInterval(heartbeat);
       busyOrgs.delete(ctx.org.id);
       if (started && !res.writableEnded) res.end();
     }
@@ -1278,7 +1284,7 @@ async function main() {
   for (const warning of warnings) console.warn(warning);
   const providers = authProviders();
   if (!Object.values(providers).some((p) => p.enabled)) {
-    console.warn('No sign-in provider is set up. Add GOOGLE_AUTH_CLIENT_ID/SECRET or GITHUB_AUTH_CLIENT_ID/SECRET to .env and restart.');
+    console.warn('No sign-in provider is set up. Set GOOGLE_AUTH_CLIENT_ID/SECRET or GITHUB_AUTH_CLIENT_ID/SECRET in .env or the environment, then restart.');
   }
   const server = http.createServer(async (req, res) => {
     try {
@@ -1295,6 +1301,22 @@ async function main() {
   });
   await listen(server, host, port);
   console.log(`Socialbrewery ready at ${appUrl()}`);
+
+  // Finish queued file writes before exiting; on Cloudflare the data folder is unmounted right after.
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    server.close();
+    server.closeAllConnections?.();
+    const timer = setTimeout(() => process.exit(0), 10000);
+    enqueue(async () => {}).finally(() => {
+      clearTimeout(timer);
+      process.exit(0);
+    });
+  };
+  process.on('SIGTERM', stop);
+  process.on('SIGINT', stop);
 }
 
 main().catch((err) => {
