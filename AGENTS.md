@@ -1,0 +1,16 @@
+# Socialbrewery
+
+Multi-organisation posting app. One Node process serves the UI, the API, and the Grok MCP connector.
+
+- Start with `npm start`, which runs `bin/socialbrewery.js`. That supervisor forks `src/server.js`.
+- `.env` holds only server settings (`HOST`, `PORT`, `APP_URL`) and the Google/GitHub sign-in apps. Changing it needs a restart.
+- Everything that posts is per organisation: `src/context.js` runs each request, connector call, and agent run inside `runWithOrg(ctx)`. Read keys with `cfg.X` (never `process.env.X`) and org files through `orgDataDir()`. There is no fallback to `process.env` for organisation keys.
+- Organisation settings and network tokens are encrypted (`src/secure.js`, AES-256-GCM, AAD bound to the org). Never send secret values to the browser: `orgSettingsView` returns `set: true` instead, and a blank value means "keep".
+- Auth: `src/auth.js` (Google with PKCE, GitHub; verified emails only), `src/accounts.js` (users, orgs, members, invites, sessions). Session cookie `sb_session` is HttpOnly and SameSite=Lax; non-GET `/api` and `/auth` requests must be same-origin. Roles: owner > admin > member. Settings, connect/disconnect, invites, member changes, and connector rotation need admin.
+- The Grok connector is `POST /mcp`; its token is looked up by hash and selects the organisation. Instagram fetches media through signed, expiring `/public/media/<org>/<id>` links. Instagram webhooks arrive at `/webhooks/instagram/<org>` (verify token derived per org; POST bodies must match `X-Hub-Signature-256` with that org's app secret).
+- Bind loopback by default. Do not print secrets or dump `process.env`.
+- YouTube, LinkedIn, Instagram, X, Hashnode, Slack, and Reddit are the networks. Reddit uses OAuth (web app, `duration=permanent`, 1-hour access tokens refreshed in `src/reddit.js`); since November 2025 new Reddit API apps need approval, so without keys Reddit runs in manual mode: `post_reddit` returns a pre-filled `submitUrl` (Reddit's own submit page) and nothing is posted until the user clicks Post; `POST /api/reddit/track` saves the resulting link. Reddit posts are text or link only, and the agent must post only to a subreddit the user named, check its rules first, and never cross-post. Slack uses a pasted bot token (Slack OAuth needs an https redirect), with a manifest served from `/api/connectors` for setup. Hashnode uses a personal access token (no OAuth) and its GraphQL API only works for blogs on Hashnode Pro. Grok posts and generates clips. Video reviews can use Grok or OpenAI.
+- Keep the app runnable with zero npm dependencies. The dashboard source is `web/` (Vite, React, shadcn/ui, Tailwind). It builds into `public/`, and that output is committed. After changing `web/`, run `npm run web:build`.
+- Dashboard colors come from `PALETTE` in `web/src/theme.ts`. Derive new colors from `--p1`..`--p4` in `web/src/index.css`, not from hard-coded values.
+- The server serves files from `public/` and falls back to `index.html` for client routes. Keep `/api/*`, `/auth/*`, `/public/*`, `/webhooks/*`, and `/mcp` out of that fallback.
+- Tests: `npm test`.

@@ -1,0 +1,115 @@
+# Socialbrewery
+
+A local app for posting YouTube Shorts, LinkedIn posts, Instagram Reels, X posts, Hashnode articles, Slack messages, and Reddit posts. Grok writes the caption, can generate a vertical clip, and uploads it to the accounts you connect.
+
+People sign in with Google or GitHub. Everything that posts belongs to an **organisation**: the xAI and OpenAI keys, every network's app credentials and connected accounts, posts, media, chat history, and the Grok connector. Each organisation keeps its own, encrypted on disk, so several teams can share one server without seeing each other's keys or accounts.
+
+It runs on `127.0.0.1` by default. Set `HOST` and an https `APP_URL` in `.env` to serve it to a team.
+
+## Start
+
+Node.js 20 or newer. No extra packages.
+
+```bash
+cd socialbrewery
+npm start
+```
+
+Open [http://127.0.0.1:3847](http://127.0.0.1:3847).
+
+## Sign-in and organisations
+
+Whoever runs the server sets up sign-in once, in `.env`, then restarts (see `.env.example`):
+
+- **GitHub**: github.com → Settings → Developer settings → OAuth Apps → New OAuth App. Callback URL: `http://127.0.0.1:3847/auth/github/callback`. Put the client ID and a client secret in `GITHUB_AUTH_CLIENT_ID` and `GITHUB_AUTH_CLIENT_SECRET`.
+- **Google**: Google Cloud → APIs & Services → Credentials → OAuth client ID (Web application). Redirect URI: `http://127.0.0.1:3847/auth/google/callback`. Use `GOOGLE_AUTH_CLIENT_ID` and `GOOGLE_AUTH_CLIENT_SECRET`.
+
+Until one is set, the sign-in page shows these steps and the exact callback URLs.
+
+- The first sign-in creates an organisation with you as owner. On an existing install, the very first organisation also takes over the old keys from `.env`, the connected accounts, posts, and media, and those keys are removed from `.env`.
+- Owners and admins invite people from **Organisation** by email. The invite link only works for that email, and signing in with that email joins automatically. Roles: **owner** (everything, including other owners), **admin** (keys, connected accounts, invites, the connector URL), **member** (post, Brew, analysis with the organisation's accounts).
+- Anyone can create more organisations from the switcher at the top of the sidebar. Each starts empty.
+
+### Encryption
+
+Organisation settings and account tokens are encrypted with AES-256-GCM under a master key, bound to the organisation they belong to. The key comes from `SOCIALBREWERY_MASTER_KEY` (32 random bytes, base64) or, if that is unset, from `.master.key`, which is created next to `.env` on first start. **Back it up**: without it, stored keys and tokens cannot be read. Saved secrets are never sent back to the browser; Settings shows them as "Saved, encrypted", and you replace or remove them.
+
+### Serving it to a team
+
+Set `HOST=0.0.0.0`, `APP_URL=https://your-domain`, and put the app behind HTTPS (a reverse proxy or a tunnel). Sign-in cookies are marked `Secure` when `APP_URL` is https, and the server warns at start if it is reachable over plain http. Every OAuth redirect URI (sign-in and networks) starts with `APP_URL`.
+
+## Dashboard
+
+The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is in `web/`, and the built files are committed in `public/`, so `npm start` needs no install.
+
+- **Overview**: post counts, connector status, setup checklist, and a quick prompt into Brew.
+- **Brew**: chat with Grok. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
+- **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.
+- **Connectors → Grok connector**: the URL and tools for grok.com.
+- **Organisation**: members, roles, invites, and the name.
+- **Settings**: this organisation's keys grouped by service (owners and admins), plus Appearance.
+
+The whole palette comes from one constant, `PALETTE` in `web/src/theme.ts` (default [#9FA1FF #B5BAFF #AEE2FF #D9F9DF](https://colorhunt.co/palette/9fa1ffb5baffaee2ffd9f9df)). Every color, including shadcn’s tokens, is derived from those four swatches in `web/src/index.css`. Settings → Appearance switches palettes in the browser without a rebuild.
+
+To change the dashboard:
+
+```bash
+npm run web:dev     # Vite on :5173, proxied to the app on :3847
+npm run web:build   # rebuilds public/
+```
+
+## Post a Short
+
+1. In [console.x.ai](https://console.x.ai/), create an API key. Paste it into **Settings** and save.
+2. In Google Cloud, enable [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com). Create an OAuth client of type **Web application**. Add the redirect URI shown on the YouTube page (`http://127.0.0.1:3847/api/youtube/callback` unless you changed the port). Add your Google account as a test user on the consent screen.
+3. Paste the client ID and secret into **Settings**, save, then **Connect YouTube**. Reconnect if the channel was linked before analytics was added.
+4. On **Brew**, ask Grok to generate a clip and post it, or attach an mp4, mov, or webm and tell Grok to post that. On **YouTube**, use **Analyze** for views, watch time, and what to change. Set **Analysis provider** to `openai` and add an OpenAI API key when that review should come from OpenAI. The default is Grok. Default privacy is unlisted.
+
+## LinkedIn, Instagram, X, Hashnode, Slack, and Reddit
+
+1. Create a LinkedIn app with **Sign In with LinkedIn using OpenID Connect** and **Share on LinkedIn**. Add the redirect URI from **Connectors** (`http://127.0.0.1:3847/api/linkedin/callback` unless you changed the port). Paste the client ID and secret into Settings, save, then **Connect LinkedIn**.
+2. Create a Meta app with **Instagram API with Instagram Login**, permissions `instagram_business_basic` and `instagram_business_content_publish`. Add the Instagram redirect URI from Connectors. Paste the Instagram app ID and secret into Settings, save, then **Connect Instagram**. Reels need a public tunnel: set **Grok connector public URL** to that https origin so Instagram can fetch `/api/media/...`. Optional webhooks (new comments and messages): Connectors → Instagram → Connection shows a per-organisation **Callback URL** (`/webhooks/instagram/<org>`) and **Verify token** for Meta App Dashboard → Configure webhooks. Every delivery must carry a valid `X-Hub-Signature-256` from that organisation's Instagram app secret; duplicates from Meta's retries are dropped. Meta only sends them once the app is Live with Advanced Access.
+3. In the [X Developer Console](https://console.x.com), create an app and add API credits (posting through the X API is paid). Under **User authentication settings**, turn on OAuth 2.0 with **Read and write** permissions and type **Web App**, and add the callback `http://127.0.0.1:3847/api/x/callback`. Paste the OAuth 2.0 **Client ID** and **Client Secret** (not the API key) into Settings, save, then **Connect X**. Posts are text or text with a video, 280 characters for standard accounts (links count as 23). Use a reply to build a thread or add links.
+4. Hashnode: since May 2026 the [GraphQL API needs your blog on Hashnode Pro](https://hashnode.com/announcements/graphql-api) (blog dashboard → Billing). Generate a personal access token at [hashnode.com/settings/developer](https://hashnode.com/settings/developer), paste it into Settings as **Hashnode access token**, and add **Hashnode blog** (e.g. `blog.example.com`) if you have more than one blog. Save, then **Connect Hashnode**. There is no OAuth redirect; Connect just checks the token and picks the blog. Articles are Markdown with up to 5 tags, and can be saved as drafts.
+5. Slack: on **Connectors → Slack → Connection**, copy the app manifest. At [api.slack.com/apps](https://api.slack.com/apps?new_app=1) choose **Create New App → From a manifest**, paste it, then **Install to Workspace**. Under **Basic Information → Display Information**, upload the app icon from the same page (`/socialbrewery-icon.png`, 1024×1024; regenerate with `python3 scripts/make-icon.py [512-2000]`). Copy the **Bot User OAuth Token** (`xoxb-…`) into Settings, optionally set a default channel like `#announcements`, save, then **Connect Slack**. The app joins public channels by itself when it posts; for private channels run `/invite @Socialbrewery` first. Messages use Slack mrkdwn, can carry a video, and can be replied to in-thread. Slack's OAuth requires an https redirect, so Socialbrewery uses the bot token instead.
+6. Reddit works **without API keys**. Since November 2025 Reddit has closed self-service API keys (reddit.com/prefs/apps just loops back to the Responsible Builder Policy). Postiz and other tools need the same keys, so they hit the same wall. In manual mode, Compose (or Grok in Brew) drafts the post and opens Reddit's own submit page with the subreddit, title, and text or link filled in; you click **Post**, then paste the post link back to track it under Posts. One-click posting, comments, flair, and stats need approved keys: request them with [Reddit's API access form](https://support.reddithelp.com/hc/en-us/requests/new?ticket_form_id=14868593862164&tf_42139884615700=api_request_type_developer_clone) (Connectors → Reddit → Connection has request text to copy). If you are approved, or have a web app from before November 2025, set its redirect URI to `http://127.0.0.1:3847/api/reddit/callback`, put the client ID and secret in Settings, and click **Connect Reddit**.
+
+You can also post yourself without the agent from each connector’s **Compose** tab.
+
+## Ask Grok on grok.com
+
+Socialbrewery is a custom connector. Grok’s connector page cannot call localhost, so expose the app with a tunnel first:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3847
+```
+
+Put the `https://….trycloudflare.com` origin into **Settings** as **Grok connector public URL**, then save. (If the app itself is served on https, that is used and no tunnel is needed.) Open **Connectors → Grok connector**, copy the URL, and in [grok.com/connectors](https://grok.com/connectors) choose **New Connector → Custom**. Paste that URL.
+
+Each organisation has its own connector URL. Its token decides which organisation's keys and accounts Grok posts with, so only owners and admins can see it, and **Rotate token** replaces it at once.
+
+Then ask Grok things like “Post an unlisted Short of rain on a copper kettle”, “Post this to LinkedIn”, “Publish a Reel”, “How did my latest video do?”, or “Change that video’s title and make it public.” The connector can post to YouTube, LinkedIn, Instagram, and X, reply on X, publish, edit, and list Hashnode articles, post and reply in Slack, read subreddit rules, post and comment on Reddit, generate a clip and post it, list recent YouTube videos, review analytics, and edit YouTube title, description, tags, or privacy. Reconnect YouTube once so Google grants that edit permission.
+
+YouTube Shorts are normal video uploads. This app sends a vertical idea to Grok (`9:16`, up to 15 seconds) and adds `#Shorts` to the description. The default YouTube quota allows a handful of uploads per day.
+
+If a Google test app is left in testing mode, the refresh token expires after 7 days. Reconnect YouTube, or publish the consent screen.
+
+## What is stored
+
+| Path | Contents |
+|---|---|
+| `.env` | Server settings and sign-in apps |
+| `.master.key` | Encryption master key (unless `SOCIALBREWERY_MASTER_KEY` is set) |
+| `data/system/` | Users, organisations, memberships, invites, sessions (hashed) |
+| `data/orgs/<id>/config.json` | The organisation's keys, encrypted |
+| `data/orgs/<id>/token-<network>.json` | Connected account tokens, encrypted |
+| `data/orgs/<id>/media/` | Attached and generated videos |
+| `data/orgs/<id>/posts.json`, `history.json`, `analyses.json` | Posts, Grok chat, performance reviews |
+
+Instagram fetches Reels through short-lived signed links (`/public/media/...`, valid for 2 hours); everything else under `/api` needs a signed-in member of the organisation.
+
+## Tests
+
+```bash
+npm test
+```

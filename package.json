@@ -1,0 +1,16 @@
+{
+  "name": "socialbrewery",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local app that posts YouTube Shorts with a Grok agent.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/socialbrewery.js",
+    "test": "node --test",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web install && npm --prefix web run build"
+  }
+}

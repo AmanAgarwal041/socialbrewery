@@ -1,0 +1,168 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+
+  /* Palette slots, usable as bg-p1, text-p3-ink, border-p2-soft, and so on. */
+  --color-p1: var(--p1);
+  --color-p2: var(--p2);
+  --color-p3: var(--p3);
+  --color-p4: var(--p4);
+  --color-p1-soft: var(--p1-soft);
+  --color-p2-soft: var(--p2-soft);
+  --color-p3-soft: var(--p3-soft);
+  --color-p4-soft: var(--p4-soft);
+  --color-p1-ink: var(--p1-ink);
+  --color-p2-ink: var(--p2-ink);
+  --color-p3-ink: var(--p3-ink);
+  --color-p4-ink: var(--p4-ink);
+  --color-ink: var(--ink);
+  --color-success: var(--p4);
+  --color-success-foreground: var(--p4-ink);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+ * Every color below is derived from --p1..--p4. Those four are set at runtime
+ * from PALETTE in src/theme.ts, so changing that one constant re-skins the app.
+ */
+:root {
+  --ink: color-mix(in oklab, var(--p1) 14%, #14122a);
+  --paper: color-mix(in oklab, var(--p2) 7%, #ffffff);
+
+  --p1-soft: color-mix(in oklab, var(--p1) 22%, #ffffff);
+  --p2-soft: color-mix(in oklab, var(--p2) 26%, #ffffff);
+  --p3-soft: color-mix(in oklab, var(--p3) 30%, #ffffff);
+  --p4-soft: color-mix(in oklab, var(--p4) 45%, #ffffff);
+  --p1-ink: color-mix(in oklab, var(--p1) 45%, var(--ink));
+  --p2-ink: color-mix(in oklab, var(--p2) 40%, var(--ink));
+  --p3-ink: color-mix(in oklab, var(--p3) 38%, var(--ink));
+  --p4-ink: color-mix(in oklab, var(--p4) 30%, var(--ink));
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: color-mix(in oklab, var(--p2) 2%, #ffffff);
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--p1);
+  --primary-foreground: var(--ink);
+  --secondary: var(--p3-soft);
+  --secondary-foreground: var(--ink);
+  --muted: color-mix(in oklab, var(--p2) 12%, #ffffff);
+  --muted-foreground: color-mix(in oklab, var(--ink) 60%, #ffffff);
+  --accent: var(--p2-soft);
+  --accent-foreground: var(--ink);
+  --destructive: oklch(0.6 0.2 22);
+  --border: color-mix(in oklab, var(--p2) 32%, #ffffff);
+  --input: color-mix(in oklab, var(--p2) 40%, #ffffff);
+  --ring: var(--p1);
+  --chart-1: var(--p1);
+  --chart-2: var(--p3);
+  --chart-3: var(--p2);
+  --chart-4: var(--p4);
+  --chart-5: var(--p1-ink);
+  --radius: 0.9rem;
+
+  --sidebar: color-mix(in oklab, var(--p2) 16%, #ffffff);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--p1);
+  --sidebar-primary-foreground: var(--ink);
+  --sidebar-accent: var(--p1-soft);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: color-mix(in oklab, var(--p2) 35%, #ffffff);
+  --sidebar-ring: var(--p1);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .bg-brew {
+    background:
+      radial-gradient(60rem 30rem at 0% 0%, color-mix(in oklab, var(--p3) 28%, transparent), transparent 60%),
+      radial-gradient(50rem 28rem at 100% 0%, color-mix(in oklab, var(--p2) 30%, transparent), transparent 60%),
+      radial-gradient(40rem 26rem at 50% 110%, color-mix(in oklab, var(--p4) 40%, transparent), transparent 60%),
+      var(--paper);
+  }
+  .bg-palette {
+    background: linear-gradient(120deg, var(--p1), var(--p2) 35%, var(--p3) 70%, var(--p4));
+  }
+  .typing-dot {
+    animation: typing 1.2s infinite ease-in-out;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
