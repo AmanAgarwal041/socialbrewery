@@ -12,7 +12,7 @@ import { OverviewPage } from '@/pages/overview'
 import { SettingsPage } from '@/pages/settings'
 
 function AppRoutes() {
-  const { session, org } = useAppState()
+  const { session, sessionError, org, refreshSession } = useAppState()
   const { pathname } = useLocation()
 
   if (pathname.startsWith('/invite/')) {
@@ -22,6 +22,7 @@ function AppRoutes() {
       </Routes>
     )
   }
+  if (!session && sessionError) return <AuthSplash error={sessionError} onRetry={() => refreshSession().catch(() => {})} />
   if (!session || (session.authenticated && !org)) return <AuthSplash />
   if (!session.authenticated) return <LoginPage />
   if (pathname === '/login') return <Navigate to="/" replace />

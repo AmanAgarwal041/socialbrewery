@@ -194,9 +194,18 @@ export const SIGNED_OUT_EVENT = 'socialbrewery:signed-out'
 
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options)
-  const data = await res.json().catch(() => ({}))
+  const text = await res.text().catch(() => '')
+  let data: unknown = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = {}
+  }
   if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
-  if (!res.ok) throw new Error((data as { error?: string }).error || 'Request failed.')
+  if (!res.ok) {
+    const plain = text && !text.trimStart().startsWith('<') ? text.trim().slice(0, 300) : ''
+    throw new Error((data as { error?: string }).error || plain || `Request failed (${res.status}).`)
+  }
   return data as T
 }
 

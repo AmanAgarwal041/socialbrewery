@@ -193,7 +193,22 @@ export function InvitePage() {
   )
 }
 
-export function AuthSplash() {
+export function AuthSplash({ error, onRetry }: { error?: string; onRetry?: () => void }) {
+  if (error) {
+    return (
+      <div className="bg-brew flex min-h-svh items-center justify-center p-6">
+        <div className="max-w-md space-y-4 rounded-2xl border bg-card p-6 text-center shadow-sm">
+          <p className="font-medium">Socialbrewery can't start yet</p>
+          <p className="text-sm break-words text-muted-foreground">{error}</p>
+          {onRetry && (
+            <Button variant="outline" onClick={onRetry}>
+              Try again
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="bg-brew flex min-h-svh items-center justify-center">
       <Loader2 className="size-6 animate-spin text-muted-foreground" />

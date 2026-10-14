@@ -15,6 +15,7 @@ import {
 
 type AppState = {
   session: Session | null
+  sessionError: string
   user: User | null
   org: OrgSummary | null
   orgs: OrgSummary[]
@@ -34,6 +35,7 @@ const AppStateContext = createContext<AppState | null>(null)
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
+  const [sessionError, setSessionError] = useState('')
   const [health, setHealth] = useState<Health | null>(null)
   const [connectors, setConnectors] = useState<Connectors | null>(null)
   const [posts, setPosts] = useState<Post[] | null>(null)
@@ -43,9 +45,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const role = org?.role ?? null
 
   const refreshSession = useCallback(async () => {
-    const next = await api<Session>('/api/session')
-    setSession(next)
-    return next
+    try {
+      const next = await api<Session>('/api/session')
+      setSession(next)
+      setSessionError('')
+      return next
+    } catch (err) {
+      setSessionError((err as Error).message)
+      throw err
+    }
   }, [])
 
   const refreshPosts = useCallback(async () => {
@@ -103,6 +111,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     <AppStateContext.Provider
       value={{
         session,
+        sessionError,
         user: signedIn?.user ?? null,
         org,
         orgs: signedIn?.orgs ?? [],
