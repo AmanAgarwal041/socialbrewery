@@ -14,6 +14,7 @@ import {
 } from './store.js';
 import { cfg } from './context.js';
 import { blobSize, onWorkers, readBlobRange } from './storage.js';
+import { fetchPublic } from './performance.js';
 
 // LinkedIn sunsets each monthly version about a year after release; bump this when it nears retirement.
 const LINKEDIN_VERSION = '202609';
@@ -167,10 +168,12 @@ async function accessToken() {
   return token.access_token;
 }
 
-export async function publishLinkedin({ mediaId, videoPath, commentary, title, source }) {
+export async function publishLinkedin({ mediaId, videoPath, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, source }) {
   const text = String(commentary || title || '').trim();
   if (!text) throw new Error('LinkedIn needs post text.');
   if (text.length > 3000) throw new Error('LinkedIn posts are limited to 3000 characters.');
+  const link = linkPreviewUrl(linkUrl);
+  let thumbnailError = '';
   const token = await accessToken();
   const stored = await readNetworkToken('linkedin');
   const author = stored?.profile?.urn;
@@ -214,6 +217,18 @@ export async function publishLinkedin({ mediaId, videoPath, commentary, title, s
         id: videoUrn,
       },
     };
+  } else if (link) {
+    const article = { source: link, title: String(linkTitle || title || link).slice(0, 400) };
+    if (String(linkDescription || '').trim()) article.description = String(linkDescription).trim().slice(0, 4086);
+    const thumbUrl = String(linkThumbnailUrl || '').trim() || youtubeThumbnail(link);
+    if (thumbUrl) {
+      try {
+        article.thumbnail = await uploadImageFromUrl({ token, owner: author, url: thumbUrl });
+      } catch (err) {
+        thumbnailError = `The link card was posted without a thumbnail: ${err.message}`;
+      }
+    }
+    body.content = { article };
   }
 
   const res = await fetch('https://api.linkedin.com/rest/posts', {
@@ -245,8 +260,55 @@ export async function publishLinkedin({ mediaId, videoPath, commentary, title, s
     createdAt: new Date().toISOString(),
     source: source || 'manual',
   };
+  if (link && !filePath) post.link = link;
   await addPost(post);
-  return post;
+  return thumbnailError ? { ...post, thumbnailError } : post;
+}
+
+function linkPreviewUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('The link to share is not a valid URL.');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('The link to share must start with http or https.');
+  if (url.username || url.password) throw new Error('The link to share cannot include a password.');
+  return url.toString();
+}
+
+function youtubeThumbnail(url) {
+  const m = String(url).match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/);
+  return m ? `https://i.ytimg.com/vi/${m[1]}/maxresdefault.jpg` : '';
+}
+
+const MAX_THUMBNAIL = 8 * 1024 * 1024;
+
+async function uploadImageFromUrl({ token, owner, url }) {
+  let { res: img } = await fetchPublic(url, 'Thumbnail URL');
+  if (!img.ok && /maxresdefault/.test(url)) ({ res: img } = await fetchPublic(url.replace('maxresdefault', 'hqdefault'), 'Thumbnail URL'));
+  if (!img.ok) throw new Error(`could not download it (${img.status}).`);
+  const type = String(img.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!type.startsWith('image/')) throw new Error('that URL is not an image.');
+  if (Number(img.headers.get('content-length') || 0) > MAX_THUMBNAIL) throw new Error('the image is larger than 8 MB.');
+  const buffer = Buffer.from(await img.arrayBuffer());
+  if (buffer.length > MAX_THUMBNAIL) throw new Error('the image is larger than 8 MB.');
+  const init = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+    method: 'POST',
+    headers: restHeaders(token, true),
+    body: JSON.stringify({ initializeUploadRequest: { owner } }),
+  });
+  const data = await init.json().catch(() => ({}));
+  if (!init.ok || !data.value?.uploadUrl) throw new Error(data.message || `Image upload init failed (${init.status}).`);
+  const put = await fetch(data.value.uploadUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': type },
+    body: buffer,
+  });
+  if (!put.ok) throw new Error(`Image upload failed (${put.status}).`);
+  return data.value.image;
 }
 
 // Posts API commentary uses LinkedIn's "little text" format; unescaped reserved characters truncate the post.

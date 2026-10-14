@@ -17,7 +17,7 @@ You can:
 - list_youtube_videos: recent uploads with view, like, and comment counts.
 - analyze_youtube_video: how one video performed and what to improve. Use the 11-character video id. Pass provider openai when the person wants OpenAI to write that review.
 - update_youtube_video: change the title, description, tags, or privacy of a video already on YouTube. Change only the fields the person named.
-- post_linkedin: post text, or a video with text, to LinkedIn. Put links the person wants in the comments in firstComment.
+- post_linkedin: post text, text with a link preview card (linkUrl, e.g. a YouTube video or an article), or a video with text, to LinkedIn. Use linkUrl when the person wants one link shown as a card; put other links in firstComment.
 - comment_linkedin: add a comment under an existing LinkedIn post, using its URN or link.
 - post_instagram_reel: post a Reel to Instagram. Needs a mediaId. A public tunnel URL must be set in Settings.
 - post_x: post text, or a video with text, to X (Twitter). Keep text within 280 characters (links count as 23). Put links or a follow-up in firstReply.
@@ -151,7 +151,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'post_linkedin',
-      description: 'Post text or a video with text to the connected LinkedIn profile.',
+      description: 'Post text, text with a link preview card, or a video with text to the connected LinkedIn profile.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -159,6 +159,10 @@ const TOOLS = [
           commentary: { type: 'string' },
           title: { type: 'string' },
           mediaId: { type: 'string' },
+          linkUrl: { type: 'string', description: 'Optional http(s) link shown as a preview card. Ignored when a video is attached.' },
+          linkTitle: { type: 'string', description: 'Optional card title.' },
+          linkDescription: { type: 'string', description: 'Optional card description.' },
+          linkThumbnailUrl: { type: 'string', description: 'Optional https image for the card. YouTube links get their thumbnail automatically.' },
           firstComment: { type: 'string', description: 'Optional comment added under the post after publishing.' },
         },
         required: ['commentary'],
@@ -519,7 +523,7 @@ function summarize(name, result) {
   if (name === 'update_youtube_video') return `Updated ${result.title || 'the video'}.`;
   if (name === 'post_linkedin') {
     const posted = result.url ? `Posted to LinkedIn: ${result.url}` : 'Posted to LinkedIn.';
-    return result.commentError ? `${posted} ${result.commentError}` : posted;
+    return [posted, result.thumbnailError, result.commentError].filter(Boolean).join(' ');
   }
   if (name === 'comment_linkedin') return 'Commented on LinkedIn.';
   if (name === 'post_instagram_reel') return result.url ? `Posted to Instagram: ${result.url}` : 'Posted to Instagram.';
@@ -589,6 +593,10 @@ async function runTool(name, args, { madeForKids, send, signal }) {
       mediaId: args.mediaId,
       commentary: args.commentary,
       title: args.title,
+      linkUrl: args.linkUrl,
+      linkTitle: args.linkTitle,
+      linkDescription: args.linkDescription,
+      linkThumbnailUrl: args.linkThumbnailUrl,
       firstComment: args.firstComment,
       source: 'agent',
     });

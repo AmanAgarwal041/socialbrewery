@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { appUrl } from './env.js';
 import { buildVideoBody, buildVideoUpdate } from './shorts.js';
-import { assertResolvedPublicUrl, isVideoId, last28DayRange, rowToMetrics, shapeVideo } from './performance.js';
+import { fetchPublic, isVideoId, last28DayRange, rowToMetrics, shapeVideo } from './performance.js';
 import {
   addPost,
   updatePostYoutube,
@@ -355,20 +355,8 @@ export async function videoPerformance(videoId) {
 }
 
 export async function importRemoteVideo(videoUrl) {
-  const url = await assertResolvedPublicUrl(videoUrl);
-  let current = url;
-  let res;
-  for (let hop = 0; hop < 3; hop += 1) {
-    res = await fetch(current, { redirect: 'manual' });
-    if (res.status >= 300 && res.status < 400) {
-      const next = res.headers.get('location');
-      if (!next) throw new Error('The video URL redirected without a destination.');
-      current = await assertResolvedPublicUrl(new URL(next, current).toString());
-      continue;
-    }
-    break;
-  }
-  if (!res?.ok) throw new Error(`Could not download that video (${res?.status || 'no response'}).`);
+  const { res, url: current } = await fetchPublic(videoUrl);
+  if (!res.ok) throw new Error(`Could not download that video (${res.status}).`);
   const type = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const mime = type === 'video/webm' ? 'video/webm' : type === 'video/quicktime' ? 'video/quicktime' : 'video/mp4';
   if (type && !type.startsWith('video/') && type !== 'application/octet-stream') {

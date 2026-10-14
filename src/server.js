@@ -1152,6 +1152,8 @@ async function orgRoute(req, res, url, ctx) {
         mediaId: body.mediaId,
         commentary: body.description || body.title,
         title: body.title,
+        linkUrl: body.linkUrl,
+        linkTitle: body.linkTitle,
         source: 'manual',
       });
     } else if (network === 'instagram') {

@@ -324,6 +324,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
   const [detailsError, setDetailsError] = useState('')
   const [kind, setKind] = useState<'self' | 'link'>('self')
   const [link, setLink] = useState('')
+  const [linkTitle, setLinkTitle] = useState('')
   const [flairId, setFlairId] = useState('')
   const [nsfw, setNsfw] = useState(false)
   const [spoiler, setSpoiler] = useState(false)
@@ -372,6 +373,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
   }, [preview])
 
   const article = network.id === 'hashnode'
+  const linkCard = network.id === 'linkedin' && !file
   const textOnly = network.id === 'linkedin' || network.id === 'x' || article || isSlack || isReddit
   const needsVideo = !textOnly
   const textLabel =
@@ -409,7 +411,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
     setBusy(true)
     try {
       const media = file && !article ? await uploadMedia(file) : null
-      await postJson('/api/posts', {
+      const result = await postJson<{ post?: { thumbnailError?: string } }>('/api/posts', {
         network: network.id,
         mediaId: media?.id,
         title: title || description.slice(0, 100),
@@ -419,6 +421,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
         madeForKids: kids,
         ...(article ? { subtitle, coverImageUrl: cover, draft } : {}),
         ...(isSlack ? { channel } : {}),
+        ...(linkCard && link.trim() ? { linkUrl: link.trim(), linkTitle: linkTitle.trim() } : {}),
         ...(isReddit
           ? {
               subreddit,
@@ -439,6 +442,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
             ? `Posted to r/${details?.name || subreddit.replace(/^\/?r\//i, '')}.`
             : isSlack && channelName ? `Posted to #${channelName}.` : `Posted to ${network.name}.`,
       )
+      if (result?.post?.thumbnailError) toast.warning(result.post.thumbnailError)
       setFile(null)
       setTitle('')
       setDescription('')
@@ -446,6 +450,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
       setSubtitle('')
       setCover('')
       setLink('')
+      setLinkTitle('')
       await refreshPosts()
       navigate(`/connectors/${network.id}/posts`)
     } catch (err) {
@@ -601,6 +606,25 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
               }
             />
           </div>
+          )}
+          {linkCard && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="compose-link-card">Link preview (optional)</Label>
+                <Input id="compose-link-card" type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://youtu.be/… or an article" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="compose-link-title">Card title</Label>
+                <Input
+                  id="compose-link-title"
+                  value={linkTitle}
+                  maxLength={400}
+                  disabled={!link.trim()}
+                  onChange={(e) => setLinkTitle(e.target.value)}
+                  placeholder="Shown on the card; YouTube links get their thumbnail"
+                />
+              </div>
+            </div>
           )}
           {isReddit && !manualReddit && (
             <div className="flex flex-wrap items-center gap-4">

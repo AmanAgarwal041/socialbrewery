@@ -67,30 +67,45 @@ export function isPrivateAddress(address) {
   return host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80');
 }
 
-export function assertPublicUrl(urlString) {
+export function assertPublicUrl(urlString, label = 'Video URL') {
   let url;
   try {
     url = new URL(String(urlString || ''));
   } catch {
-    throw new Error('That video URL is not valid.');
+    throw new Error(`That ${label.toLowerCase()} is not valid.`);
   }
-  if (url.protocol !== 'https:') throw new Error('Video URL must be https.');
-  if (url.username || url.password) throw new Error('Video URL cannot include a password.');
+  if (url.protocol !== 'https:') throw new Error(`${label} must be https.`);
+  if (url.username || url.password) throw new Error(`${label} cannot include a password.`);
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
-    throw new Error('Video URL must be a public address.');
+    throw new Error(`${label} must be a public address.`);
   }
-  if (net.isIP(host) && isPrivateAddress(host)) throw new Error('Video URL must be a public address.');
+  if (net.isIP(host) && isPrivateAddress(host)) throw new Error(`${label} must be a public address.`);
   return url;
 }
 
-export async function assertResolvedPublicUrl(urlString) {
-  const url = assertPublicUrl(urlString);
+export async function assertResolvedPublicUrl(urlString, label = 'Video URL') {
+  const url = assertPublicUrl(urlString, label);
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (net.isIP(host)) return url;
   const records = await lookup(host, { all: true });
   if (records.some((record) => isPrivateAddress(record.address))) {
-    throw new Error('Video URL must be a public address.');
+    throw new Error(`${label} must be a public address.`);
   }
   return url;
+}
+
+// Fetches a URL someone else supplied. Every hop, redirects included, must resolve to a public
+// address so the server cannot be pointed at its own network.
+export async function fetchPublic(urlString, label = 'Video URL') {
+  let current = await assertResolvedPublicUrl(urlString, label);
+  for (let hop = 0; hop < 4; hop += 1) {
+    const res = await fetch(current, { redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return { res, url: current };
+    const next = res.headers.get('location');
+    await res.body?.cancel();
+    if (!next) throw new Error(`The ${label.toLowerCase()} redirected without a destination.`);
+    current = await assertResolvedPublicUrl(new URL(next, current).toString(), label);
+  }
+  throw new Error(`The ${label.toLowerCase()} redirected too many times.`);
 }

@@ -14,3 +14,4 @@ cloudflare/config.yml
 cloudflare/*.json
 .dev.vars
 .wrangler/
+uploads/

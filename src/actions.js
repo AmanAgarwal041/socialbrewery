@@ -74,7 +74,7 @@ export async function generateAndPost({
   });
 }
 
-export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary, title, firstComment, source }) {
+export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, firstComment, source }) {
   let id = mediaId;
   if (!id && videoUrl) {
     const media = await importRemoteVideo(videoUrl);
@@ -83,6 +83,10 @@ export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary,
   const post = await publishLinkedin({
     mediaId: id,
     videoPath,
+    linkUrl,
+    linkTitle,
+    linkDescription,
+    linkThumbnailUrl,
     commentary: commentary || title,
     title,
     source: source || 'connector',
@@ -92,6 +96,8 @@ export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary,
     url: post.url,
     title: post.title,
   };
+  if (post.link) result.link = post.link;
+  if (post.thumbnailError) result.thumbnailError = post.thumbnailError;
   if (String(firstComment || '').trim()) {
     try {
       result.comment = await commentLinkedin({ post: post.linkedinId, text: firstComment });
