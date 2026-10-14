@@ -110,3 +110,19 @@ test('LinkedIn link cards need an http(s) link', async () => {
     await assert.rejects(postToLinkedIn({ commentary: 'x', linkUrl: 'not a url' }), /not a valid URL/);
   });
 });
+
+test('the connector cannot point LinkedIn at files on the server', async () => {
+  const { MCP_TOOLS } = await import('../src/mcp.js');
+  const tool = MCP_TOOLS.find((t) => t.name === 'post_linkedin');
+  assert.equal(tool.inputSchema.properties.videoPath, undefined);
+  await inOrg(async () => {
+    await connect();
+    await withFetch((call) => {
+      if (call.url === 'https://api.linkedin.com/rest/posts') return new Response(null, { status: 201 });
+      throw new Error(`Unexpected URL ${call.url}`);
+    }, async (calls) => {
+      await postToLinkedIn({ commentary: 'Text only', videoPath: '/etc/hosts' });
+      assert.equal(posted(calls).content, undefined, 'a videoPath is ignored, so nothing is uploaded');
+    });
+  });
+});

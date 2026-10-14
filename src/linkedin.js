@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { appUrl } from './env.js';
 import {
@@ -13,7 +12,7 @@ import {
   writeOauthState,
 } from './store.js';
 import { cfg } from './context.js';
-import { blobSize, onWorkers, readBlobRange } from './storage.js';
+import { blobSize, readBlobRange } from './storage.js';
 import { fetchPublic } from './performance.js';
 
 // LinkedIn sunsets each monthly version about a year after release; bump this when it nears retirement.
@@ -168,7 +167,7 @@ async function accessToken() {
   return token.access_token;
 }
 
-export async function publishLinkedin({ mediaId, videoPath, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, source }) {
+export async function publishLinkedin({ mediaId, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, source }) {
   const text = String(commentary || title || '').trim();
   if (!text) throw new Error('LinkedIn needs post text.');
   if (text.length > 3000) throw new Error('LinkedIn posts are limited to 3000 characters.');
@@ -193,23 +192,13 @@ export async function publishLinkedin({ mediaId, videoPath, commentary, title, l
   };
 
   let filePath = '';
-  let bytes = 0;
   if (mediaId) {
     const media = await getMedia(mediaId);
     if (!media) throw new Error('That video is not in the library.');
     filePath = mediaPath(media);
-    bytes = (await blobSize(filePath)) || 0;
+    const bytes = (await blobSize(filePath)) || 0;
     if (!bytes) throw new Error('That video file is missing from storage.');
-  } else if (videoPath) {
-    if (onWorkers()) throw new Error('Attach the video to the library first; local file paths only work when running on your own machine.');
-    filePath = String(videoPath).trim();
-    if (!filePath) throw new Error('That video path is empty.');
-    const stat = await fs.stat(filePath).catch(() => null);
-    if (!stat?.isFile() || stat.size <= 0) throw new Error('That video path is not a readable file.');
-    bytes = stat.size;
-  }
-  if (filePath) {
-    const read = mediaId ? (start, end) => readBlobRange(filePath, start, end) : (start, end) => readLocalRange(filePath, start, end);
+    const read = (start, end) => readBlobRange(filePath, start, end);
     const videoUrn = await uploadVideo({ token, owner: author, read, bytes });
     body.content = {
       media: {
@@ -479,14 +468,3 @@ async function putRange(urlString, chunk) {
   return etag.replace(/^"|"$/g, '');
 }
 
-async function readLocalRange(file, start, end) {
-  const length = end - start + 1;
-  const buffer = Buffer.alloc(length);
-  const handle = await fs.open(file, 'r');
-  try {
-    const { bytesRead } = await handle.read(buffer, 0, length, start);
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    await handle.close();
-  }
-}

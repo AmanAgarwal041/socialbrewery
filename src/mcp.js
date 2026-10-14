@@ -125,7 +125,6 @@ export const MCP_TOOLS = [
         commentary: { type: 'string', description: 'Post text. Required unless title is set.' },
         title: { type: 'string', description: 'Optional video title.' },
         mediaId: { type: 'string', description: 'SocialBrewery media ID for a local video.' },
-        videoPath: { type: 'string', description: 'Absolute local path to an mp4, mov, or webm file.' },
         videoUrl: { type: 'string', description: 'Public https URL of an mp4, mov, or webm.' },
         linkUrl: { type: 'string', description: 'Optional URL to share as a link preview card (article), e.g. a YouTube video. Ignored when a video is attached.' },
         linkTitle: { type: 'string', description: 'Optional title for the link preview card.' },

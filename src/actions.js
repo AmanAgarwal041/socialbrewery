@@ -74,7 +74,7 @@ export async function generateAndPost({
   });
 }
 
-export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, firstComment, source }) {
+export async function postToLinkedIn({ mediaId, videoUrl, commentary, title, linkUrl, linkTitle, linkDescription, linkThumbnailUrl, firstComment, source }) {
   let id = mediaId;
   if (!id && videoUrl) {
     const media = await importRemoteVideo(videoUrl);
@@ -82,7 +82,6 @@ export async function postToLinkedIn({ mediaId, videoPath, videoUrl, commentary,
   }
   const post = await publishLinkedin({
     mediaId: id,
-    videoPath,
     linkUrl,
     linkTitle,
     linkDescription,
