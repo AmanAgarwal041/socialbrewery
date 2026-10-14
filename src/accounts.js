@@ -6,6 +6,7 @@ import { isOrgId, orgDataDir, runWithOrg } from './context.js';
 import { legacyOrgSettings, orgDefaults, stripLegacyOrgSettings } from './env.js';
 import { decryptJson, encryptJson, isEncrypted, randomToken, sha256 } from './secure.js';
 import { NETWORKS, enqueue, readJson, systemDir, writeJson, writeNetworkToken } from './store.js';
+import { onWorkers } from './storage.js';
 
 const usersFile = path.join(systemDir, 'users.json');
 const orgsFile = path.join(systemDir, 'orgs.json');
@@ -52,27 +53,20 @@ function normalizeEmail(value) {
 
 // ---------- organisation settings (encrypted) ----------
 
-const configCache = new Map();
-
 function configFile(orgId) {
   return path.join(orgDataDir(orgId), 'config.json');
 }
 
 export async function loadOrgConfig(orgId) {
-  if (configCache.has(orgId)) return configCache.get(orgId);
   const stored = await readJson(configFile(orgId), null);
   const values = isEncrypted(stored) ? decryptJson(stored, `${orgId}:config`) : {};
-  const config = Object.freeze({ ...orgDefaults(), ...values });
-  configCache.set(orgId, config);
-  return config;
+  return Object.freeze({ ...orgDefaults(), ...values });
 }
 
 export async function saveOrgConfig(orgId, values) {
   const config = Object.freeze({ ...orgDefaults(), ...values });
   const box = encryptJson(config, `${orgId}:config`);
-  await fs.mkdir(orgDataDir(orgId), { recursive: true, mode: 0o700 });
   await enqueue(() => writeJson(configFile(orgId), box));
-  configCache.set(orgId, config);
   await update(orgsFile, (orgs) =>
     orgs.map((org) => (org.id === orgId ? { ...org, connectorHash: config.CONNECTOR_TOKEN ? sha256(config.CONNECTOR_TOKEN) : '' } : org)),
   );
@@ -346,6 +340,7 @@ export async function isFirstOrg() {
 }
 
 export async function migrateLegacyInto(org) {
+  if (onWorkers()) return;
   const target = orgDataDir(org.id);
   await fs.mkdir(target, { recursive: true, mode: 0o700 });
   const settings = await legacyOrgSettings();

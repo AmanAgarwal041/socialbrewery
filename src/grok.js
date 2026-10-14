@@ -1,6 +1,6 @@
-import fs from 'node:fs/promises';
 import { clampSeconds } from './shorts.js';
 import { allocateMedia, rememberMedia } from './store.js';
+import { onWorkers, removeEntry, writeBlob } from './storage.js';
 import { cfg } from './context.js';
 
 function apiKey() {
@@ -80,7 +80,8 @@ export async function generateShort({ prompt, duration, onProgress, signal }) {
   const deadline = Date.now() + 8 * 60 * 1000;
   let video;
   while (Date.now() < deadline) {
-    await delay(4000, signal);
+    // Each status check is a subrequest; the Workers free plan allows 50 per request.
+    await delay(onWorkers() ? 15000 : 4000, signal);
     onProgress?.('Generating the Short…');
     const data = await xai(`/v1/videos/${requestId}`);
     if (data.status === 'done') {
@@ -107,7 +108,7 @@ export async function generateShort({ prompt, duration, onProgress, signal }) {
     await rememberMedia(record);
     return record;
   } catch (err) {
-    await fs.rm(filePath, { force: true });
+    await removeEntry(filePath).catch(() => {});
     throw err;
   }
 }
@@ -120,6 +121,6 @@ async function download(url, dest) {
   if (!res.ok) throw new Error(`Could not download the generated video (${res.status}).`);
   const bytes = Buffer.from(await res.arrayBuffer());
   if (bytes.length < 1000) throw new Error('The generated video file was empty.');
-  await fs.writeFile(dest, bytes, { mode: 0o600 });
+  await writeBlob(dest, bytes, { mime: 'video/mp4' });
   return bytes.length;
 }

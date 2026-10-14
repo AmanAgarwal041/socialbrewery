@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { appUrl, loadEnv, normalizeOrgSettings, normalizeSystem, orgSettingsView, secureCookies } from './env.js';
@@ -35,6 +36,7 @@ import { cfg, currentContext, isOrgId, runWithOrg } from './context.js';
 import { verifySignature } from './secure.js';
 import { runAgent } from './agent.js';
 import { publicDir } from './paths.js';
+import { blobSize, blobStream } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
 import { analyzeVideo } from './analysis.js';
 import { connectorDetails, connectorTokenFrom, handleRpc } from './mcp.js';
@@ -107,7 +109,9 @@ import {
   trackRedditPost,
 } from './reddit.js';
 
-const bootId = randomUUID();
+// Created on first use: Workers forbid random values while a module loads.
+let bootValue = '';
+const bootId = () => (bootValue ||= randomUUID());
 const MAX_VIDEO = 200 * 1024 * 1024;
 const EXT_MIME = {
   '.mp4': 'video/mp4',
@@ -225,7 +229,7 @@ async function health() {
   ]);
   return {
     ok: true,
-    bootId,
+    bootId: bootId(),
     xai: Boolean(cfg.XAI_API_KEY),
     youtubeApp: Boolean(cfg.YOUTUBE_CLIENT_ID && cfg.YOUTUBE_CLIENT_SECRET),
     youtubeConnected: youtube.connected,
@@ -350,36 +354,68 @@ async function serveMedia(req, res, id) {
   const record = await getMedia(id);
   if (!record) throw fail('That video is not in the library.', 404);
   const file = mediaPath(record);
-  const stat = await fs.stat(file);
+  const size = await blobSize(file);
+  if (size == null) throw fail('That video file is missing from storage.', 404);
   const mime = record.mime || 'video/mp4';
   const range = req.headers.range;
   if (range) {
     const match = /^bytes=(\d+)-(\d*)$/.exec(range);
     if (!match) throw fail('Ask for a byte range like bytes=0-.');
     const start = Number(match[1]);
-    const end = match[2] ? Number(match[2]) : stat.size - 1;
-    if (start > end || end >= stat.size) throw fail('That range is outside the video.');
+    const end = match[2] ? Number(match[2]) : size - 1;
+    if (start > end || end >= size) throw fail('That range is outside the video.');
     res.writeHead(206, {
       'Content-Type': mime,
       'Content-Length': end - start + 1,
-      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Content-Range': `bytes ${start}-${end}/${size}`,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store',
     });
-    const stream = createReadStream(file, { start, end });
+    const stream = await blobStream(file, { start, end });
     res.on('close', () => stream.destroy());
     stream.pipe(res);
     return;
   }
   res.writeHead(200, {
     'Content-Type': mime,
-    'Content-Length': stat.size,
+    'Content-Length': size,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store',
   });
-  const stream = createReadStream(file);
+  const stream = await blobStream(file);
   res.on('close', () => stream.destroy());
   stream.pipe(res);
+}
+
+// The Workers entry moves video bytes between the browser and R2 itself, because streaming them
+// through node:http would spend the free plan's CPU budget. These apply the same checks as route().
+export function mediaUploadInfo(req) {
+  const name = filenameFrom(req);
+  const kind = videoKind(name, req.headers['content-type']);
+  if (!kind) throw fail('Use an mp4, mov, or webm file.');
+  return { name, mime: kind.mime };
+}
+
+export async function signedInContext(req, known) {
+  const unsafe = req.method !== 'GET' && req.method !== 'HEAD';
+  if (unsafe && !sameOrigin(req)) throw fail('Cross-site request refused.', 403);
+  const { session, user } = known || (await sessionInfo(req));
+  if (!user) throw fail('Sign in to continue.', 401);
+  let orgId = session.orgId;
+  if (!isOrgId(orgId)) orgId = (await membershipsFor(user.id))[0]?.id || '';
+  const ctx = await orgContextFor(user, orgId);
+  if (!ctx) throw fail('Choose an organisation first.', 409);
+  return ctx;
+}
+
+export async function publicMediaContext(orgId, mediaId, searchParams) {
+  const exp = Number(searchParams.get('exp'));
+  if (!exp || exp < Date.now() / 1000 || !verifySignature(`media:${orgId}:${mediaId}:${exp}`, searchParams.get('sig'))) {
+    throw fail('That media link expired.', 403);
+  }
+  const org = await getOrg(orgId);
+  if (!org) throw fail('Not found.', 404);
+  return { org: { id: org.id, name: org.name }, config: await loadOrgConfig(org.id), user: null, role: 'member' };
 }
 
 async function serveMcp(req, res, url) {
@@ -444,15 +480,8 @@ async function route(req, res) {
   const publicMedia = pathname.match(/^\/public\/media\/([a-f0-9]{24})\/([0-9a-f-]{36})$/i);
   if (req.method === 'GET' && publicMedia) {
     const [, orgId, mediaId] = publicMedia;
-    const exp = Number(url.searchParams.get('exp'));
-    if (!exp || exp < Date.now() / 1000 || !verifySignature(`media:${orgId}:${mediaId}:${exp}`, url.searchParams.get('sig'))) {
-      throw fail('That media link expired.', 403);
-    }
-    const org = await getOrg(orgId);
-    if (!org) throw fail('Not found.', 404);
-    await runWithOrg({ org: { id: org.id, name: org.name }, config: await loadOrgConfig(org.id), user: null, role: 'member' }, () =>
-      serveMedia(req, res, mediaId),
-    );
+    const ctx = await publicMediaContext(orgId, mediaId, url.searchParams);
+    await runWithOrg(ctx, () => serveMedia(req, res, mediaId));
     return;
   }
 
@@ -524,7 +553,7 @@ async function route(req, res) {
   }
 
   if (req.method === 'GET' && pathname === '/api/health' && !user) {
-    sendJson(res, 200, { ok: true, bootId, authenticated: false });
+    sendJson(res, 200, { ok: true, bootId: bootId(), authenticated: false });
     return;
   }
 
@@ -560,10 +589,7 @@ async function route(req, res) {
     return;
   }
 
-  let orgId = session.orgId;
-  if (!isOrgId(orgId)) orgId = (await membershipsFor(user.id))[0]?.id || '';
-  const ctx = await orgContextFor(user, orgId);
-  if (!ctx) throw fail('Choose an organisation first.', 409);
+  const ctx = await signedInContext(req, { session, user });
   await runWithOrg(ctx, () => orgRoute(req, res, url, ctx));
 }
 
@@ -1273,6 +1299,20 @@ function listen(server, host, port) {
   });
 }
 
+export async function handleRequest(req, res) {
+  try {
+    await route(req, res);
+  } catch (err) {
+    if (res.headersSent) {
+      console.error(err);
+      return;
+    }
+    const status = err.status || 500;
+    if (status === 500) console.error(err);
+    sendJson(res, status, { error: err.message || 'Something went wrong.' });
+  }
+}
+
 async function main() {
   const values = await loadEnv();
   await ensureData();
@@ -1286,23 +1326,11 @@ async function main() {
   if (!Object.values(providers).some((p) => p.enabled)) {
     console.warn('No sign-in provider is set up. Set GOOGLE_AUTH_CLIENT_ID/SECRET or GITHUB_AUTH_CLIENT_ID/SECRET in .env or the environment, then restart.');
   }
-  const server = http.createServer(async (req, res) => {
-    try {
-      await route(req, res);
-    } catch (err) {
-      if (res.headersSent) {
-        console.error(err);
-        return;
-      }
-      const status = err.status || 500;
-      if (status === 500) console.error(err);
-      sendJson(res, status, { error: err.message || 'Something went wrong.' });
-    }
-  });
+  const server = http.createServer(handleRequest);
   await listen(server, host, port);
   console.log(`Socialbrewery ready at ${appUrl()}`);
 
-  // Finish queued file writes before exiting; on Cloudflare the data folder is unmounted right after.
+  // Finish queued file writes before exiting.
   let stopping = false;
   const stop = () => {
     if (stopping) return;
@@ -1319,7 +1347,17 @@ async function main() {
   process.on('SIGINT', stop);
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+function runDirectly() {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (runDirectly()) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}

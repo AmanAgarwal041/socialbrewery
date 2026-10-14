@@ -1,8 +1,8 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { addPost, clearNetworkToken, getMedia, listPosts, mediaPath, readNetworkToken, writeNetworkToken } from './store.js';
 import { cfg } from './context.js';
+import { blobSize, readBlobRange } from './storage.js';
 
 const API = 'https://slack.com/api';
 
@@ -205,13 +205,14 @@ async function permalink(channel, ts) {
 }
 
 async function uploadSlackFile({ channel, filePath, name, title, comment, threadTs }) {
-  const stat = await fs.stat(filePath);
+  const size = await blobSize(filePath);
+  if (!size) throw new Error('That video file is missing from storage.');
   const filename = path.basename(name || filePath).replace(/[\r\n"]/g, '') || 'clip.mp4';
-  const ticket = await slackApi('files.getUploadURLExternal', { filename, length: stat.size });
+  const ticket = await slackApi('files.getUploadURLExternal', { filename, length: size });
   const upload = await fetch(ticket.upload_url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
-    body: await fs.readFile(filePath),
+    body: await readBlobRange(filePath, 0, size - 1),
   });
   if (!upload.ok) throw new Error(`Slack did not accept the file upload (${upload.status}).`);
   const done = await slackApi('files.completeUploadExternal', {

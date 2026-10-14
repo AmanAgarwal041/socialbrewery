@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { home } from './paths.js';
+import { onWorkers } from './storage.js';
 
 const keyFile = path.join(home, '.master.key');
 let cached = null;
@@ -17,6 +18,7 @@ export function masterKey() {
     cached = key;
     return key;
   }
+  if (onWorkers()) throw new Error('Set the SOCIALBREWERY_MASTER_KEY secret (32 random bytes, base64).');
   try {
     const key = Buffer.from(fs.readFileSync(keyFile, 'utf8').trim(), 'base64');
     if (key.length !== 32) throw new Error(`${keyFile} is not a valid master key.`);

@@ -1,6 +1,3 @@
-import fs from 'node:fs/promises';
-import https from 'node:https';
-import { createReadStream } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { appUrl } from './env.js';
 import { buildVideoBody, buildVideoUpdate } from './shorts.js';
@@ -19,6 +16,7 @@ import {
   writeToken,
 } from './store.js';
 import { cfg } from './context.js';
+import { blobSize, readBlobRange } from './storage.js';
 
 const UPLOAD_SCOPE = 'https://www.googleapis.com/auth/youtube.upload';
 const READ_SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
@@ -198,12 +196,13 @@ export async function publishShort({
   const media = await getMedia(mediaId);
   if (!media) throw new Error('That video is not in the library. Attach a file or ask Grok to generate one.');
   const filePath = mediaPath(media);
-  const stat = await fs.stat(filePath);
+  const bytes = await blobSize(filePath);
+  if (!bytes) throw new Error('That video file is missing from storage.');
   const body = buildVideoBody({ title, description, tags, privacyStatus, madeForKids });
   const video = await uploadFile({
     filePath,
     mime: media.mime || 'video/mp4',
-    bytes: stat.size,
+    bytes,
     body,
   });
   const post = {
@@ -409,27 +408,24 @@ async function youtubeSend(method, path, token, body) {
   return data;
 }
 
-function putFile(urlString, filePath, { mime, bytes }) {
-  const url = new URL(urlString);
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      protocol: url.protocol,
-      hostname: url.hostname,
-      port: url.port || 443,
-      path: `${url.pathname}${url.search}`,
+// Resumable upload in 8 MiB pieces (a multiple of 256 KiB, as YouTube requires) so a whole video
+// never sits in memory and each piece is one request.
+const UPLOAD_CHUNK = 8 * 1024 * 1024;
+
+async function putFile(url, filePath, { mime, bytes }) {
+  let start = 0;
+  for (;;) {
+    const end = Math.min(start + UPLOAD_CHUNK, bytes) - 1;
+    const res = await fetch(url, {
       method: 'PUT',
-      headers: {
-        'Content-Type': mime,
-        'Content-Length': bytes,
-      },
-    }, (res) => {
-      const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => {
-        resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks).toString('utf8') });
-      });
+      redirect: 'manual',
+      headers: { 'Content-Type': mime, 'Content-Range': `bytes ${start}-${end}/${bytes}` },
+      body: await readBlobRange(filePath, start, end),
     });
-    req.on('error', reject);
-    createReadStream(filePath).on('error', reject).pipe(req);
-  });
+    const text = await res.text();
+    if (res.status !== 308) return { status: res.status, body: text };
+    const received = /bytes=0-(\d+)/.exec(res.headers.get('range') || '');
+    start = received ? Number(received[1]) + 1 : 0;
+    if (start >= bytes) return { status: 500, body: 'YouTube did not finish the upload.' };
+  }
 }

@@ -3,37 +3,37 @@
   "name": "socialbrewery",
   "main": "worker/index.js",
   "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // One container runs the whole Node app. Its data folder (/data) is an R2 bucket mounted with FUSE,
-  // so users, organisations, encrypted keys, posts, and videos survive restarts and redeploys.
-  "containers": [
-    {
-      "class_name": "SocialbreweryContainer",
-      "image": "./Dockerfile",
-      "instance_type": "standard-1",
-      // The app stores files, so exactly one copy may run.
-      "max_instances": 1
-    }
+  // The dashboard is plain static files; Cloudflare serves them without running the Worker.
+  // Only API, sign-in, connector, media, and webhook paths reach the Worker.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/mcp", "/public/*", "/webhooks/*"]
+  },
+
+  // Users, organisations, encrypted settings and tokens, posts, and history (one JSON document per row).
+  // Create it with: npx wrangler d1 create socialbrewery   then paste the database_id here.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "socialbrewery", "database_id": "<your-d1-database-id>" }
   ],
-  "durable_objects": {
-    "bindings": [{ "name": "APP", "class_name": "SocialbreweryContainer" }]
-  },
-  "exports": {
-    "SocialbreweryContainer": { "type": "durable-object", "storage": "sqlite" }
-  },
+
+  // Uploaded and generated videos.
+  // Create it with: npx wrangler r2 bucket create socialbrewery-media
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "socialbrewery-media" }
+  ],
 
   "vars": {
     // Public address of the app: the workers.dev URL or your custom domain. OAuth redirects start with it.
-    "APP_URL": "https://socialbrewery.<your-subdomain>.workers.dev",
-    "R2_ACCOUNT_ID": "<your-cloudflare-account-id>",
-    "R2_BUCKET_NAME": "socialbrewery-data"
+    "APP_URL": "https://socialbrewery.<your-subdomain>.workers.dev"
   }
 
-  // Secrets (wrangler secret put <NAME>), never in this file:
+  // Secrets (npx wrangler secret put <NAME>), never in this file:
   //   SOCIALBREWERY_MASTER_KEY   required, 32 random bytes base64 (openssl rand -base64 32)
-  //   R2_ACCESS_KEY_ID           required, R2 API token with Object Read & Write on the bucket
-  //   R2_SECRET_ACCESS_KEY       required
   //   GITHUB_AUTH_CLIENT_ID / GITHUB_AUTH_CLIENT_SECRET   and/or
   //   GOOGLE_AUTH_CLIENT_ID / GOOGLE_AUTH_CLIENT_SECRET
 }

@@ -34,32 +34,45 @@ Until one is set, the sign-in page shows these steps and the exact callback URLs
 
 Organisation settings and account tokens are encrypted with AES-256-GCM under a master key, bound to the organisation they belong to. The key comes from `SOCIALBREWERY_MASTER_KEY` (32 random bytes, base64) or, if that is unset, from `.master.key`, which is created next to `.env` on first start. **Back it up**: without it, stored keys and tokens cannot be read. Saved secrets are never sent back to the browser; Settings shows them as "Saved, encrypted", and you replace or remove them.
 
-### Deploy on Cloudflare Workers (Containers)
+### Deploy on Cloudflare Workers (Free plan)
 
-`wrangler.jsonc` deploys a small Worker (`worker/index.js`) that forwards every request to one [Cloudflare Container](https://developers.cloudflare.com/containers/) running the Node app. The container's data folder, `/data`, is an R2 bucket mounted with FUSE ([tigrisfs](https://developers.cloudflare.com/containers/examples/r2-fuse-mount/)), so users, organisations, encrypted keys, posts, and videos survive restarts and redeploys. The `Dockerfile` is only for this image: Cloudflare builds and runs it, you do not host Docker yourself.
+The same app runs as a Worker on the Workers Free plan, with no server to keep running:
 
-Needs a Workers Paid plan and Docker running on the machine that runs `wrangler deploy` (it builds the image there).
+- The routes in `src/server.js` run inside the Worker through `node:http` support (`worker/index.js`).
+- The dashboard in `public/` is served as Static Assets.
+- Users, organisations, encrypted settings and tokens, posts, and history are JSON documents in a D1 database.
+- Videos are stored in an R2 bucket. The Worker streams uploads and playback straight to and from R2.
 
 1. `npm install` (installs Wrangler; the app itself still has no runtime dependencies).
-2. Create the bucket: `npx wrangler r2 bucket create socialbrewery-data`. In the dashboard, under R2 → Manage API tokens, create a token with **Object Read & Write** on that bucket only.
-3. In `wrangler.jsonc`, set `APP_URL` (your `https://socialbrewery.<subdomain>.workers.dev` URL or custom domain) and `R2_ACCOUNT_ID`.
+2. Create the database and the bucket, then paste the printed `database_id` into `wrangler.jsonc`:
+   ```bash
+   npx wrangler d1 create socialbrewery
+   npx wrangler r2 bucket create socialbrewery-media
+   ```
+3. In `wrangler.jsonc`, set `APP_URL` to your `https://socialbrewery.<subdomain>.workers.dev` URL or custom domain.
 4. Add the secrets:
    ```bash
    npx wrangler secret put SOCIALBREWERY_MASTER_KEY   # openssl rand -base64 32, and keep a copy
-   npx wrangler secret put R2_ACCESS_KEY_ID
-   npx wrangler secret put R2_SECRET_ACCESS_KEY
    npx wrangler secret put GITHUB_AUTH_CLIENT_ID       # and/or the GOOGLE_AUTH_* pair
    npx wrangler secret put GITHUB_AUTH_CLIENT_SECRET
    ```
-5. `npm run cf:deploy`. The first deploy takes a few minutes to provision the container. Until every required value is set, the Worker answers with a list of what is missing.
+5. `npm run cf:deploy`. The D1 table is created on the first request. Until the key, `APP_URL`, and both bindings are set, the Worker answers with a list of what is missing.
 6. Point the sign-in and network OAuth apps at redirect URIs that start with `APP_URL`.
 
-How it behaves:
+To try it locally first, put `SOCIALBREWERY_MASTER_KEY` and `APP_URL=http://127.0.0.1:8787` in `.dev.vars` (ignored by git), then run `npm run cf:dev`. This uses a local D1 and R2.
 
-- Exactly one container runs (`max_instances: 1`), because the app stores files. It sleeps after 30 minutes without requests and starts again on the next one (a few seconds); webhooks wake it too. On sleep or redeploy the app finishes its pending writes before R2 is unmounted.
-- R2 through FUSE is slower than a local disk, which is fine for JSON files and occasional videos.
-- Cloudflare's 100 MB request body limit applies to video uploads. Grok runs stay open with a keepalive every 20 seconds.
-- Without `SOCIALBREWERY_MASTER_KEY` the encrypted data cannot be read after a restart, so the Worker refuses to start the app until it is set.
+Free plan limits that matter:
+
+- **Request size.** Video uploads are capped at 100 MB, Cloudflare's request body limit.
+- **Requests to outside services.** Each request may call outside services 50 times. A Grok run spends this budget on chat turns, on video status checks (every 15 seconds on Workers, so up to about 30 per generated video), and on uploads:
+  - YouTube: 8 MB pieces.
+  - LinkedIn: the parts LinkedIn asks for.
+  - X: 4 MB pieces.
+
+  Generate a video and then post it in two separate messages instead of one long run.
+- **CPU time.** Each request gets 10 ms of CPU time. Waiting on the network does not count, but very long agent runs can still hit it. If that happens, Workers Paid ($5/month) raises the limits without code changes.
+- **Simultaneous writes.** Writes from requests that run at the same moment are not merged, so the last write wins. That is fine for a small team, but two people changing the same organisation's settings in the same second can overwrite each other.
+- **Lost key.** Without `SOCIALBREWERY_MASTER_KEY` nothing encrypted can be read, so the app refuses to run until it is set.
 
 ### Deploy with Cloudflare Tunnel
 
@@ -155,7 +168,7 @@ If a Google test app is left in testing mode, the refresh token expires after 7 
 | `data/orgs/<id>/media/` | Attached and generated videos |
 | `data/orgs/<id>/posts.json`, `history.json`, `analyses.json` | Posts, Grok chat, performance reviews |
 
-Everything lives in one folder: the app directory, or `SOCIALBREWERY_HOME` when that is set (on Cloudflare Containers, the R2 bucket mounted at `/data`). Back up that whole folder, including `.master.key` (or keep `SOCIALBREWERY_MASTER_KEY` somewhere safe); the encrypted files are useless without the key.
+Running with Node, everything lives in one folder: the app directory, or `SOCIALBREWERY_HOME` when that is set. On Cloudflare Workers the same paths are keys: JSON files are rows in the D1 `documents` table (`npx wrangler d1 export socialbrewery --remote --output backup.sql` backs them up), and videos are objects in the R2 bucket. Back up that whole folder, including `.master.key` (or keep `SOCIALBREWERY_MASTER_KEY` somewhere safe); the encrypted files are useless without the key.
 
 Instagram fetches Reels through short-lived signed links (`/public/media/...`, valid for 2 hours); everything else under `/api` needs a signed-in member of the organisation.
 

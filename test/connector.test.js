@@ -1,8 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
   assertPublicUrl,
   isPrivateAddress,
@@ -34,9 +31,8 @@ test('LinkedIn commentary escapes reserved characters and keeps hashtags clickab
 
 test('LinkedIn native video upload dry-runs with mocked fetch', async () => {
   const previousFetch = globalThis.fetch;
-  const directory = await mkdtemp(join(tmpdir(), 'socialbrewery-video-'));
-  const filePath = join(directory, 'clip.mp4');
-  await writeFile(filePath, Buffer.from('test'));
+  const video = Buffer.from('test');
+  const read = async (start, end) => video.subarray(start, end + 1);
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     const call = { url: String(url), method: init.method || 'GET', body: init.body };
@@ -56,7 +52,7 @@ test('LinkedIn native video upload dry-runs with mocked fetch', async () => {
     throw new Error(`Unexpected mocked URL: ${call.url}`);
   };
   try {
-    const videoUrn = await uploadVideo({ token: 'test-token', owner: 'urn:li:person:test', filePath, bytes: 4 });
+    const videoUrn = await uploadVideo({ token: 'test-token', owner: 'urn:li:person:test', read, bytes: 4 });
     assert.equal(videoUrn, 'urn:li:video:test');
     assert.deepEqual(calls.map((call) => [call.method, call.url]), [
       ['POST', 'https://api.linkedin.com/rest/videos?action=initializeUpload'],
@@ -71,7 +67,6 @@ test('LinkedIn native video upload dry-runs with mocked fetch', async () => {
     });
   } finally {
     globalThis.fetch = previousFetch;
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -143,10 +138,9 @@ test('X post ids parse from ids and links', async () => {
 test('X chunked video upload dry-runs with mocked fetch', async () => {
   const { uploadXVideo } = await import('../src/x.js');
   const previousFetch = globalThis.fetch;
-  const directory = await mkdtemp(join(tmpdir(), 'socialbrewery-x-'));
-  const filePath = join(directory, 'clip.mp4');
   const bytes = 5 * 1024 * 1024;
-  await writeFile(filePath, Buffer.alloc(bytes, 1));
+  const video = Buffer.alloc(bytes, 1);
+  const read = async (start, end) => video.subarray(start, end + 1);
   const calls = [];
   let polls = 0;
   globalThis.fetch = async (url, init = {}) => {
@@ -163,7 +157,7 @@ test('X chunked video upload dry-runs with mocked fetch', async () => {
     return new Response('{}', { status: 404 });
   };
   try {
-    const id = await uploadXVideo({ token: 't', filePath, bytes, mime: 'video/mp4' });
+    const id = await uploadXVideo({ token: 't', read, bytes, mime: 'video/mp4' });
     assert.equal(id, '777');
     const init = JSON.parse(calls[0].body);
     assert.deepEqual(init, { media_type: 'video/mp4', media_category: 'tweet_video', total_bytes: bytes });
@@ -173,7 +167,6 @@ test('X chunked video upload dry-runs with mocked fetch', async () => {
     assert.equal(polls, 1);
   } finally {
     globalThis.fetch = previousFetch;
-    await rm(directory, { recursive: true, force: true });
   }
 });
 

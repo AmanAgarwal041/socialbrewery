@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { appUrl } from './env.js';
 import {
@@ -14,6 +13,7 @@ import {
   writeOauthState,
 } from './store.js';
 import { cfg } from './context.js';
+import { blobSize, onWorkers, readBlobRange } from './storage.js';
 
 // LinkedIn sunsets each monthly version about a year after release; bump this when it nears retirement.
 const LINKEDIN_VERSION = '202609';
@@ -195,8 +195,10 @@ export async function publishLinkedin({ mediaId, videoPath, commentary, title, s
     const media = await getMedia(mediaId);
     if (!media) throw new Error('That video is not in the library.');
     filePath = mediaPath(media);
-    bytes = (await fs.stat(filePath)).size;
+    bytes = (await blobSize(filePath)) || 0;
+    if (!bytes) throw new Error('That video file is missing from storage.');
   } else if (videoPath) {
+    if (onWorkers()) throw new Error('Attach the video to the library first; local file paths only work when running on your own machine.');
     filePath = String(videoPath).trim();
     if (!filePath) throw new Error('That video path is empty.');
     const stat = await fs.stat(filePath).catch(() => null);
@@ -204,7 +206,8 @@ export async function publishLinkedin({ mediaId, videoPath, commentary, title, s
     bytes = stat.size;
   }
   if (filePath) {
-    const videoUrn = await uploadVideo({ token, owner: author, filePath, bytes });
+    const read = mediaId ? (start, end) => readBlobRange(filePath, start, end) : (start, end) => readLocalRange(filePath, start, end);
+    const videoUrn = await uploadVideo({ token, owner: author, read, bytes });
     body.content = {
       media: {
         title: String(title || text).slice(0, 200),
@@ -353,7 +356,7 @@ export async function updateLinkedInPost(urn, text) {
   };
 }
 
-export async function uploadVideo({ token, owner, filePath, bytes }) {
+export async function uploadVideo({ token, owner, read, bytes }) {
   const init = await fetch('https://api.linkedin.com/rest/videos?action=initializeUpload', {
     method: 'POST',
     headers: restHeaders(token, true),
@@ -380,7 +383,7 @@ export async function uploadVideo({ token, owner, filePath, bytes }) {
     const first = Number(part.firstByte);
     const last = Number(part.lastByte);
     const length = last - first + 1;
-    const etag = await putRange(part.uploadUrl, filePath, first, length, token);
+    const etag = await putRange(part.uploadUrl, await read(first, last));
     etags.push(etag);
   }
 
@@ -402,18 +405,26 @@ export async function uploadVideo({ token, owner, filePath, bytes }) {
   return videoUrn;
 }
 
-async function putRange(urlString, filePath, start, length, token) {
+async function putRange(urlString, chunk) {
   const res = await fetch(urlString, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': String(length),
-    },
-    body: createReadStream(filePath, { start, end: start + length - 1 }),
-    duplex: 'half',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: chunk,
   });
   const etag = res.headers.get('etag') || '';
   if (!res.ok) throw new Error(`LinkedIn upload part failed (${res.status}).`);
   if (!etag) throw new Error('LinkedIn did not return an ETag for the uploaded part.');
   return etag.replace(/^"|"$/g, '');
+}
+
+async function readLocalRange(file, start, end) {
+  const length = end - start + 1;
+  const buffer = Buffer.alloc(length);
+  const handle = await fs.open(file, 'r');
+  try {
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }

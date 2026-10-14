@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { appUrl } from './env.js';
 import {
@@ -13,6 +12,7 @@ import {
   writeOauthState,
 } from './store.js';
 import { cfg } from './context.js';
+import { blobSize, readBlobRange } from './storage.js';
 
 const API = 'https://api.x.com/2';
 const SCOPES = 'tweet.read tweet.write users.read media.write offline.access';
@@ -220,7 +220,7 @@ async function xSend(method, path, token, body) {
   return data;
 }
 
-export async function uploadXVideo({ token, filePath, bytes, mime }) {
+export async function uploadXVideo({ token, read, bytes, mime }) {
   if (bytes > MAX_VIDEO) throw new Error('X videos must be 512 MB or smaller.');
   const init = await xSend('POST', '/media/upload/initialize', token, {
     media_type: mime || 'video/mp4',
@@ -230,29 +230,23 @@ export async function uploadXVideo({ token, filePath, bytes, mime }) {
   const mediaId = init.data?.id;
   if (!mediaId) throw new Error('X did not start the video upload.');
 
-  const handle = await fs.open(filePath, 'r');
-  try {
-    let segment = 0;
-    for (let offset = 0; offset < bytes; offset += CHUNK) {
-      const length = Math.min(CHUNK, bytes - offset);
-      const chunk = Buffer.alloc(length);
-      await handle.read(chunk, 0, length, offset);
-      const form = new FormData();
-      form.append('segment_index', String(segment));
-      form.append('media', new Blob([chunk], { type: 'application/octet-stream' }), 'chunk');
-      const res = await fetch(`${API}/media/upload/${mediaId}/append`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(xError(data, 'X rejected part of the video upload.'));
-      }
-      segment += 1;
+  let segment = 0;
+  for (let offset = 0; offset < bytes; offset += CHUNK) {
+    const length = Math.min(CHUNK, bytes - offset);
+    const chunk = await read(offset, offset + length - 1);
+    const form = new FormData();
+    form.append('segment_index', String(segment));
+    form.append('media', new Blob([chunk], { type: 'application/octet-stream' }), 'chunk');
+    const res = await fetch(`${API}/media/upload/${mediaId}/append`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(xError(data, 'X rejected part of the video upload.'));
     }
-  } finally {
-    await handle.close();
+    segment += 1;
   }
 
   const done = await xSend('POST', `/media/upload/${mediaId}/finalize`, token);
@@ -285,8 +279,10 @@ export async function publishX({ mediaId, text, title, replyTo, source }) {
     const media = await getMedia(mediaId);
     if (!media) throw new Error('That video is not in the library.');
     const filePath = mediaPath(media);
-    const bytes = (await fs.stat(filePath)).size;
-    const xMediaId = await uploadXVideo({ token, filePath, bytes, mime: media.mime });
+    const bytes = await blobSize(filePath);
+    if (!bytes) throw new Error('That video file is missing from storage.');
+    const read = (start, end) => readBlobRange(filePath, start, end);
+    const xMediaId = await uploadXVideo({ token, read, bytes, mime: media.mime });
     payload.media = { media_ids: [xMediaId] };
   }
   const data = await xSend('POST', '/tweets', token, payload);

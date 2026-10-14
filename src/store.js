@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { dataDir } from './paths.js';
 import { currentOrgId, orgDataDir } from './context.js';
 import { decryptJson, encryptJson, isEncrypted } from './secure.js';
+import { onWorkers, readText, removeEntry, writeBlob, writeText } from './storage.js';
 
 export const systemDir = path.join(dataDir, 'system');
 
@@ -28,40 +29,26 @@ function networkOauthFile(network) {
 
 let queue = Promise.resolve();
 
+// Serialises read-modify-write updates within one Node process. Workers isolates cannot share
+// promises across requests, so there each update runs on its own.
 export function enqueue(fn) {
+  if (onWorkers()) return Promise.resolve().then(fn);
   const run = queue.then(fn, fn);
   queue = run.then(() => undefined, () => undefined);
   return run;
 }
 
 export async function readJson(file, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8'));
-  } catch (err) {
-    if (err.code === 'ENOENT') return fallback;
-    throw err;
-  }
+  const text = await readText(file);
+  return text == null ? fallback : JSON.parse(text);
 }
 
-export async function writeJson(file, value, mode = 0o600) {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  const handle = await fs.open(tmp, 'w', mode);
-  try {
-    await handle.writeFile(JSON.stringify(value, null, 2));
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await fs.rename(tmp, file);
+export async function writeJson(file, value) {
+  await writeText(file, JSON.stringify(value, null, 2));
 }
 
 export async function ensureData() {
-  await fs.mkdir(systemDir, { recursive: true, mode: 0o700 });
-}
-
-async function ensureMediaDir() {
-  await fs.mkdir(mediaDir(), { recursive: true, mode: 0o700 });
+  if (!onWorkers()) await fs.mkdir(systemDir, { recursive: true, mode: 0o700 });
 }
 
 export function updateJson(file, fallback, mutator) {
@@ -153,9 +140,7 @@ export function writeNetworkToken(network, token) {
 
 export function clearNetworkToken(network) {
   const file = networkTokenFile(network);
-  return enqueue(async () => {
-    await fs.rm(file, { force: true });
-  });
+  return enqueue(() => removeEntry(file));
 }
 
 export async function readOauthState(network = 'youtube') {
@@ -169,9 +154,7 @@ export function writeOauthState(state, network = 'youtube') {
 
 export function clearOauthState(network = 'youtube') {
   const file = networkOauthFile(network);
-  return enqueue(async () => {
-    await fs.rm(file, { force: true });
-  });
+  return enqueue(() => removeEntry(file));
 }
 
 export async function getMedia(id) {
@@ -200,11 +183,10 @@ export function addMediaRecord(record) {
 }
 
 export async function createMedia({ buffer, name, mime, source, prompt }) {
-  await ensureMediaDir();
   const id = randomUUID();
   const ext = mime === 'video/webm' ? '.webm' : mime === 'video/quicktime' ? '.mov' : '.mp4';
   const file = `${id}${ext}`;
-  await fs.writeFile(path.join(mediaDir(), file), buffer, { mode: 0o600 });
+  await writeBlob(path.join(mediaDir(), file), buffer, { mime });
   const record = {
     id,
     name: name || `short${ext}`,
@@ -220,7 +202,6 @@ export async function createMedia({ buffer, name, mime, source, prompt }) {
 }
 
 export async function allocateMedia({ name, mime, source, prompt }) {
-  await ensureMediaDir();
   const id = randomUUID();
   const ext = mime === 'video/webm' ? '.webm' : mime === 'video/quicktime' ? '.mov' : '.mp4';
   const file = `${id}${ext}`;
