@@ -1,18 +1,22 @@
 import http from 'node:http';
 import { httpServerHandler } from 'cloudflare:node';
 import { env } from 'cloudflare:workers';
-import { useStorage, storageKey, writeBlob } from '../src/storage.js';
+import { useStorage, storageKey } from '../src/storage.js';
 import { cloudflareStorage } from './storage.js';
 import { runWithOrg } from '../src/context.js';
 import { allocateMedia, getMedia, mediaPath, rememberMedia } from '../src/store.js';
 import { handleRequest, mediaUploadInfo, publicMediaContext, signedInContext } from '../src/server.js';
 
 const PORT = 3847;
-// Cloudflare refuses request bodies above 100 MB on the Free plan.
-const MAX_UPLOAD = 100 * 1024 * 1024;
 const REQUIRED = ['APP_URL', 'SOCIALBREWERY_MASTER_KEY'];
 
-useStorage(cloudflareStorage({ db: env.DB, bucket: env.MEDIA }));
+const storage = cloudflareStorage({
+  db: env.DB,
+  bucket: env.MEDIA,
+  maxVideoMb: Number(env.D1_VIDEO_MAX_MB) || 25,
+  budgetMb: Number(env.D1_VIDEO_BUDGET_MB) || 350,
+});
+useStorage(storage);
 http.createServer(handleRequest).listen(PORT);
 const app = httpServerHandler({ port: PORT });
 
@@ -23,10 +27,9 @@ export default {
   async fetch(request, workerEnv, ctx) {
     const missing = REQUIRED.filter((key) => !workerEnv[key] || String(workerEnv[key]).includes('<'));
     if (!workerEnv.DB) missing.push('DB (D1 binding)');
-    if (!workerEnv.MEDIA) missing.push('MEDIA (R2 binding)');
     if (missing.length) return text(503, `Socialbrewery is not configured yet. Set: ${missing.join(', ')}`);
 
-    // Video bytes go straight between the client and R2; everything else runs through the Node app.
+    // Video bytes go straight between the client and storage; everything else runs through the Node app.
     try {
       const { pathname, searchParams } = new URL(request.url);
       if (request.method === 'POST' && pathname === '/api/media') return await upload(request);
@@ -55,10 +58,12 @@ async function upload(request) {
   const { name, mime } = mediaUploadInfo(req);
   const length = Number(request.headers.get('content-length') || 0);
   if (!length || !request.body) throw httpError('That video file is empty.', 400);
-  if (length > MAX_UPLOAD) throw httpError('Videos must be 100 MB or smaller on this server.', 413);
+  if (length > storage.maxVideoBytes) {
+    throw httpError(`Videos must be ${Math.floor(storage.maxVideoBytes / 1024 / 1024)} MB or smaller on this server.`, 413);
+  }
   return runWithOrg(ctx, async () => {
     const { record, filePath } = await allocateMedia({ name, mime, source: 'upload' });
-    record.bytes = await writeBlob(filePath, request.body, { mime });
+    record.bytes = await storage.writeBlob(storageKey(filePath), request.body, { mime, size: length });
     await rememberMedia(record);
     return json(201, { media: record });
   });
@@ -68,35 +73,41 @@ async function serveVideo(request, ctx, mediaId) {
   return runWithOrg(ctx, async () => {
     const record = await getMedia(mediaId);
     if (!record) throw httpError('That video is not in the library.', 404);
-    const wantsRange = request.headers.has('range');
-    let object;
-    try {
-      object = await env.MEDIA.get(storageKey(mediaPath(record)), wantsRange ? { range: request.headers } : undefined);
-    } catch {
-      throw httpError('That range is outside the video.', 416);
-    }
-    if (!object) throw httpError('That video file is missing from storage.', 404);
+    const key = storageKey(mediaPath(record));
+    const size = await storage.blobSize(key);
+    if (size == null) throw httpError('That video is no longer stored. Attach it or generate it again.', 404);
     const headers = new Headers({
       'Content-Type': record.mime || 'video/mp4',
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
     });
-    if (!wantsRange || !object.range) {
-      headers.set('Content-Length', String(object.size));
-      return new Response(object.body, { status: 200, headers });
+    const range = parseRange(request.headers.get('range'), size);
+    if (!range) {
+      headers.set('Content-Length', String(size));
+      return new Response(await storage.blobBody(key), { status: 200, headers });
     }
-    const range = object.range;
-    const offset = range.suffix != null ? object.size - range.suffix : range.offset ?? 0;
-    const length = range.suffix != null ? range.suffix : range.length ?? object.size - offset;
-    if (offset < 0 || length <= 0 || offset + length > object.size) {
-      object.body.cancel();
-      throw httpError('That range is outside the video.', 416);
-    }
-    headers.set('Content-Length', String(length));
-    headers.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${object.size}`);
-    return new Response(object.body, { status: 206, headers });
+    headers.set('Content-Length', String(range.end - range.start + 1));
+    headers.set('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+    return new Response(await storage.blobBody(key, range), { status: 206, headers });
   });
+}
+
+function parseRange(header, size) {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) throw httpError('Ask for a byte range like bytes=0-.', 416);
+  let start;
+  let end;
+  if (!match[1]) {
+    start = Math.max(0, size - Number(match[2]));
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  }
+  if (start > end || start >= size) throw httpError('That range is outside the video.', 416);
+  return { start, end };
 }
 
 function httpError(message, status) {

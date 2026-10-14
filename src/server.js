@@ -36,7 +36,7 @@ import { cfg, currentContext, isOrgId, runWithOrg } from './context.js';
 import { verifySignature } from './secure.js';
 import { runAgent } from './agent.js';
 import { publicDir } from './paths.js';
-import { blobSize, blobStream } from './storage.js';
+import { blobSize, blobStream, maxVideoBytes } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
 import { analyzeVideo } from './analysis.js';
 import { connectorDetails, connectorTokenFrom, handleRpc } from './mcp.js';
@@ -112,7 +112,6 @@ import {
 // Created on first use: Workers forbid random values while a module loads.
 let bootValue = '';
 const bootId = () => (bootValue ||= randomUUID());
-const MAX_VIDEO = 200 * 1024 * 1024;
 const EXT_MIME = {
   '.mp4': 'video/mp4',
   '.m4v': 'video/mp4',
@@ -247,6 +246,7 @@ async function health() {
     redditConnected: reddit.connected,
     redirectUri: redirectUri(),
     url: appUrl(),
+    maxUploadMb: Math.floor(maxVideoBytes() / 1024 / 1024),
   };
 }
 
@@ -1125,7 +1125,7 @@ async function orgRoute(req, res, url, ctx) {
     const name = filenameFrom(req);
     const kind = videoKind(name, req.headers['content-type']);
     if (!kind) throw fail('Use an mp4, mov, or webm file.');
-    const buffer = await readBody(req, MAX_VIDEO);
+    const buffer = await readBody(req, maxVideoBytes());
     if (!buffer.length) throw fail('That video file is empty.');
     const media = await createMedia({ buffer, name, mime: kind.mime, source: 'upload' });
     sendJson(res, 201, { media });

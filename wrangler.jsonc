@@ -18,18 +18,20 @@
   // Users, organisations, encrypted settings and tokens, posts, and history (one JSON document per row).
   // Create it with: npx wrangler d1 create socialbrewery   then paste the database_id here.
   "d1_databases": [
-    { "binding": "DB", "database_name": "socialbrewery", "database_id": "<your-d1-database-id>" }
+    { "binding": "DB", "database_name": "socialbrewery", "database_id": "7895e062-1d60-4d12-a0a6-a821f7be7dbb" }
   ],
 
-  // Uploaded and generated videos.
-  // Create it with: npx wrangler r2 bucket create socialbrewery-media
-  "r2_buckets": [
-    { "binding": "MEDIA", "bucket_name": "socialbrewery-media" }
-  ],
+  // Videos. Without a bucket they are kept in D1 in pieces: at most 25 MB each, and the oldest are
+  // removed once they pass 350 MB in total (D1_VIDEO_MAX_MB / D1_VIDEO_BUDGET_MB change that).
+  // For bigger or more videos, use R2 (10 GB free, but Cloudflare asks for a payment method first):
+  //   npx wrangler r2 bucket create socialbrewery-media   then uncomment this block.
+  // "r2_buckets": [
+  //   { "binding": "MEDIA", "bucket_name": "socialbrewery-media" }
+  // ],
 
   "vars": {
     // Public address of the app: the workers.dev URL or your custom domain. OAuth redirects start with it.
-    "APP_URL": "https://socialbrewery.<your-subdomain>.workers.dev"
+    "APP_URL": "https://socialbrewery.agarwal-aman041.workers.dev"
   }
 
   // Secrets (npx wrangler secret put <NAME>), never in this file:

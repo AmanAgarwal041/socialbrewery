@@ -36,6 +36,7 @@ export const blobSize = (file) => current().blobSize(storageKey(file));
 export const readBlobRange = (file, start, end) => current().readBlobRange(storageKey(file), start, end);
 export const blobStream = (file, range) => current().blobStream(storageKey(file), range);
 export const writeBlob = (file, body, options = {}) => current().writeBlob(storageKey(file), body, options);
+export const maxVideoBytes = () => current().maxVideoBytes || 200 * 1024 * 1024;
 
 export function fileStorage(base = dataDir) {
   const full = (key) => path.join(base, ...key.split('/'));

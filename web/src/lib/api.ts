@@ -14,6 +14,7 @@ export type OrgDetails = { org: { id: string; name: string }; role: Role; member
 export type Health = {
   ok: boolean
   bootId: string
+  maxUploadMb?: number
   xai: boolean
   youtubeApp: boolean
   youtubeConnected: boolean

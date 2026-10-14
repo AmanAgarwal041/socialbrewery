@@ -805,7 +805,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
                 <Upload className="size-5" />
               </span>
               <span className="font-medium text-foreground">Drop a video or click to browse</span>
-              <span className="text-xs">mp4, mov, or webm up to 200 MB</span>
+              <span className="text-xs">mp4, mov, or webm up to {health?.maxUploadMb ?? 200} MB</span>
             </button>
           )}
         </CardContent>
