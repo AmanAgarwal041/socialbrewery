@@ -14,10 +14,16 @@ export const SYSTEM_FIELDS = [
 // Per-organisation settings: encrypted in data/orgs/<id>/config.json and edited by organisation admins.
 export const ORG_FIELDS = [
   {
+    key: 'AGENT_PROVIDER',
+    label: 'Assistant',
+    secret: false,
+    help: 'Who runs Brew and writes drafts: grok or claude. Video clips are always generated with Grok.',
+  },
+  {
     key: 'XAI_API_KEY',
     label: 'xAI API key',
     secret: true,
-    help: 'From console.x.ai. Grok uses it to write the post and, if you ask, to generate the clip.',
+    help: 'From console.x.ai. Grok uses it to write and post, and every assistant uses it to generate clips.',
   },
   {
     key: 'XAI_MODEL',
@@ -32,10 +38,22 @@ export const ORG_FIELDS = [
     help: 'Default grok-imagine-video-1.5. Used when Grok generates a Short.',
   },
   {
+    key: 'ANTHROPIC_API_KEY',
+    label: 'Anthropic API key',
+    secret: true,
+    help: 'From console.anthropic.com. Used when the assistant or the reviews are set to Claude.',
+  },
+  {
+    key: 'CLAUDE_MODEL',
+    label: 'Claude model',
+    secret: false,
+    help: 'Default claude-opus-5-5. Also claude-sonnet-5-5, claude-haiku-4-5, or claude-fable-5-1.',
+  },
+  {
     key: 'ANALYSIS_PROVIDER',
     label: 'Analysis provider',
     secret: false,
-    help: 'Who writes the performance review: grok or openai. Posting still uses Grok.',
+    help: 'Who writes the performance review: grok, claude, or openai.',
   },
   {
     key: 'OPENAI_API_KEY',
@@ -173,6 +191,9 @@ export function systemDefaults() {
 export function orgDefaults() {
   return {
     XAI_API_KEY: '',
+    AGENT_PROVIDER: 'grok',
+    ANTHROPIC_API_KEY: '',
+    CLAUDE_MODEL: 'claude-opus-5-5',
     XAI_MODEL: 'grok-4.6',
     XAI_VIDEO_MODEL: 'grok-imagine-video-1.5',
     ANALYSIS_PROVIDER: 'grok',
@@ -320,9 +341,13 @@ export function normalizeOrgSettings(input, current = {}, clear = []) {
   if (!values.XAI_MODEL) values.XAI_MODEL = orgDefaults().XAI_MODEL;
   if (!values.XAI_VIDEO_MODEL) values.XAI_VIDEO_MODEL = orgDefaults().XAI_VIDEO_MODEL;
   if (!values.OPENAI_MODEL) values.OPENAI_MODEL = orgDefaults().OPENAI_MODEL;
+  if (!values.CLAUDE_MODEL) values.CLAUDE_MODEL = orgDefaults().CLAUDE_MODEL;
   const provider = String(values.ANALYSIS_PROVIDER || 'grok').toLowerCase();
-  if (provider !== 'grok' && provider !== 'openai') errors.push('Analysis provider must be grok or openai.');
+  if (!['grok', 'claude', 'openai'].includes(provider)) errors.push('Analysis provider must be grok, claude, or openai.');
   else values.ANALYSIS_PROVIDER = provider;
+  const agent = String(values.AGENT_PROVIDER || 'grok').toLowerCase();
+  if (!['grok', 'claude'].includes(agent)) errors.push('Assistant must be grok or claude.');
+  else values.AGENT_PROVIDER = agent;
 
   return { values, errors };
 }

@@ -18,7 +18,14 @@ import { PALETTE, PRESETS, applyPalette, resetPalette, savedPalette, type Palett
 type Group = { id: string; title: string; description: string; icon: ComponentType<SVGProps<SVGSVGElement>>; tone: string; keys: string[] }
 
 const GROUPS: Group[] = [
-  { id: 'ai', title: 'AI models', description: 'Grok writes, posts, and generates clips. Reviews can use Grok or OpenAI.', icon: Bot, tone: 'bg-p1-soft text-p1-ink', keys: ['XAI_API_KEY', 'XAI_MODEL', 'XAI_VIDEO_MODEL', 'ANALYSIS_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL'] },
+  {
+    id: 'ai',
+    title: 'AI models',
+    description: 'Grok or Claude runs Brew and writes drafts. Clips are generated with Grok. Reviews can use Grok, Claude, or OpenAI.',
+    icon: Bot,
+    tone: 'bg-p1-soft text-p1-ink',
+    keys: ['AGENT_PROVIDER', 'XAI_API_KEY', 'XAI_MODEL', 'XAI_VIDEO_MODEL', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'ANALYSIS_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL'],
+  },
   { id: 'youtube', title: 'YouTube', description: 'OAuth client from Google Cloud.', icon: YoutubeIcon, tone: 'bg-p1-soft text-p1-ink', keys: ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET'] },
   { id: 'linkedin', title: 'LinkedIn', description: 'App credentials from LinkedIn Developers.', icon: LinkedinIcon, tone: 'bg-p3-soft text-p3-ink', keys: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'] },
   { id: 'instagram', title: 'Instagram', description: 'Instagram API with Instagram Login, from the Meta App Dashboard.', icon: InstagramIcon, tone: 'bg-p2-soft text-p2-ink', keys: ['INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET'] },
@@ -60,14 +67,15 @@ function Field({
           <code className="font-mono text-[10px] text-muted-foreground">{cleared ? 'will be removed' : field.key}</code>
         )}
       </div>
-      {field.key === 'ANALYSIS_PROVIDER' ? (
+      {field.key === 'ANALYSIS_PROVIDER' || field.key === 'AGENT_PROVIDER' ? (
         <Select value={value || 'grok'} onValueChange={onChange}>
           <SelectTrigger id={id} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="grok">Grok</SelectItem>
-            <SelectItem value="openai">OpenAI</SelectItem>
+            <SelectItem value="claude">Claude</SelectItem>
+            {field.key === 'ANALYSIS_PROVIDER' && <SelectItem value="openai">OpenAI</SelectItem>}
           </SelectContent>
         </Select>
       ) : (

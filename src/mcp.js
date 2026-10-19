@@ -92,7 +92,7 @@ export const MCP_TOOLS = [
           videoId: { type: 'string' },
           provider: {
             type: 'string',
-            enum: ['grok', 'openai'],
+            enum: ['grok', 'claude', 'openai'],
             description: 'Who writes the review. Omit this to use the Analysis provider in Settings.',
           },
         },

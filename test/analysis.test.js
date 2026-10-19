@@ -6,11 +6,12 @@ import { runWithOrg } from '../src/context.js';
 
 const inOrg = (config, fn) => runWithOrg({ org: { id: 'a'.repeat(24), name: 'Test' }, config, user: null, role: 'owner' }, fn);
 
-test('analysis provider is grok or openai', () => {
+test('analysis provider is grok, claude, or openai', () => {
   inOrg({}, () => {
     assert.equal(analysisProvider(), 'grok');
     assert.equal(analysisProvider('OpenAI'), 'openai');
-    assert.throws(() => analysisProvider('claude'), /grok or openai/);
+    assert.equal(analysisProvider('Claude'), 'claude');
+    assert.throws(() => analysisProvider('gemini'), /grok, claude, or openai/);
   });
   inOrg({ ANALYSIS_PROVIDER: 'openai' }, () => assert.equal(analysisProvider(), 'openai'));
 });

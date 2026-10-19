@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Tell Grok what to make. It writes, films, and posts.</strong><br />
-  A posting studio for YouTube Shorts, LinkedIn, Instagram Reels, X, Hashnode, Slack, and Reddit, with a Grok agent and an MCP connector for your own agents.
+  A posting studio for YouTube Shorts, LinkedIn, Instagram Reels, X, Hashnode, Slack, and Reddit, with a Grok or Claude agent and an MCP connector for your own agents.
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 
 - **Brew with Grok.** Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
 - **Seven networks, one dashboard.** Each network has Overview, Posts, Compose, Analysis, and Connection tabs, so you can also post by hand.
-- **AI performance reviews.** YouTube Analysis shows channel stats and reviews each video with Grok or OpenAI.
+- **AI performance reviews.** YouTube Analysis shows channel stats and reviews each video with Grok, Claude, or OpenAI.
 - **Built for teams.** Organisations and roles (admin, member) via Clerk. Every organisation's keys and account tokens are encrypted with AES-256-GCM and never sent back to the browser.
 - **For agents.** A custom MCP connector, so Grok on grok.com, Claude, or any MCP client can post, reply, edit, and review through it.
 - **Runs anywhere.** On Cloudflare Workers with D1 on the Free plan, or locally on Node.js 20 with no runtime dependencies.
@@ -186,7 +186,7 @@ The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is 
 
 - **Landing page**: signed-out visitors at `/` see the landing page (`web/src/pages/landing.tsx`, screenshots in `web/public/landing/`). `/overview` and every other page open the dashboard in a read-only exploring mode. Signed in, `/` is the Overview.
 - **Overview**: post counts, connector status, setup checklist, and a quick prompt into Brew.
-- **Brew**: chat with Grok. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
+- **Brew**: chat with Grok or Claude (Settings → AI models → Assistant). Clips are always generated with Grok Imagine. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
 - **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.
 - **Connectors → Grok connector / Claude connector**: the connector URL and tools, with setup steps for grok.com, claude.ai, Claude Desktop, and Claude Code.
 - **Chrome extension**: download the extension (`extension/`, packaged by `npm run ext:package` into `web/public/downloads/`). It posts from the user's own tabs with their own Anthropic or xAI key, asks before anything is published, and signing in only saves runs.

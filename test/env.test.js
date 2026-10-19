@@ -51,7 +51,10 @@ test('organisation settings keep secrets write-only', () => {
   assert.equal(key.set, true);
   assert.equal(JSON.stringify(view).includes('xai-saved'), false);
 
-  assert.ok(normalizeOrgSettings({ ANALYSIS_PROVIDER: 'claude' }).errors.length);
+  assert.equal(normalizeOrgSettings({ ANALYSIS_PROVIDER: 'claude' }).errors.length, 0);
+  assert.ok(normalizeOrgSettings({ ANALYSIS_PROVIDER: 'gemini' }).errors.length);
+  assert.equal(normalizeOrgSettings({ AGENT_PROVIDER: 'Claude' }).values.AGENT_PROVIDER, 'claude');
+  assert.ok(normalizeOrgSettings({ AGENT_PROVIDER: 'gemini' }).errors.length);
   assert.ok(normalizeOrgSettings({ MCP_PUBLIC_URL: 'http://tunnel.example' }).errors.length);
   assert.equal(normalizeOrgSettings({ MCP_PUBLIC_URL: 'https://t.example/mcp' }).values.MCP_PUBLIC_URL, 'https://t.example');
 });

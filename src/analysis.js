@@ -1,3 +1,4 @@
+import { claudeChat } from './claude.js';
 import { grokChat } from './grok.js';
 import { openaiChat } from './openai.js';
 import { videoPerformance } from './youtube.js';
@@ -14,7 +15,7 @@ Stay under 220 words.`;
 
 export function analysisProvider(value) {
   const name = String(value || cfg.ANALYSIS_PROVIDER || 'grok').trim().toLowerCase();
-  if (name !== 'grok' && name !== 'openai') throw new Error('Analysis provider must be grok or openai.');
+  if (!['grok', 'claude', 'openai'].includes(name)) throw new Error('Analysis provider must be grok, claude, or openai.');
   return name;
 }
 
@@ -25,9 +26,10 @@ export async function analyzeVideo(videoId, options = {}) {
     { role: 'system', content: SYSTEM },
     { role: 'user', content: JSON.stringify(performance) },
   ];
-  const message = provider === 'openai' ? await openaiChat({ messages }) : await grokChat({ messages });
+  const chat = { openai: openaiChat, claude: claudeChat, grok: grokChat }[provider];
+  const message = await chat({ messages });
   const analysis = String(message.content || '').trim();
-  if (!analysis) throw new Error(provider === 'openai' ? 'OpenAI returned an empty review.' : 'Grok returned an empty review.');
+  if (!analysis) throw new Error(`${{ openai: 'OpenAI', claude: 'Claude', grok: 'Grok' }[provider]} returned an empty review.`);
   const record = {
     videoId: performance.video.id,
     title: performance.video.title,

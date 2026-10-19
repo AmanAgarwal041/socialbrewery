@@ -109,7 +109,7 @@ function VideoReview({ video, provider, onReviewed }: { video: Video; provider: 
       {analysis && (
         <div className="mx-4 rounded-2xl bg-gradient-to-br from-p2-soft to-p3-soft p-4">
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-p1-ink">
-            <Sparkles className="size-3.5" /> AI review{review ? ` · ${review.provider === 'openai' ? 'OpenAI' : 'Grok'}` : ''}
+            <Sparkles className="size-3.5" /> AI review{review ? ` · ${{ openai: 'OpenAI', claude: 'Claude' }[review.provider as string] || 'Grok'}` : ''}
           </p>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">{analysis}</p>
         </div>
@@ -232,6 +232,7 @@ function YoutubeAnalysis({ network }: { network: NetworkMeta }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="grok">Grok</SelectItem>
+              <SelectItem value="claude">Claude</SelectItem>
               <SelectItem value="openai">OpenAI</SelectItem>
             </SelectContent>
           </Select>
@@ -288,7 +289,7 @@ function ActivityAnalysis({ network }: { network: NetworkMeta }) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Posts" value={mine.length} icon={network.icon} tone={network.slot} />
         <Stat label="Last 4 weeks" value={weeks.slice(-4).reduce((a, w) => a + w.value, 0)} icon={BarChart3} tone="p3" />
-        <Stat label="By Grok" value={(bySource.agent || 0) + (bySource.grok || 0) + (bySource.connector || 0)} icon={Sparkles} tone="p2" />
+        <Stat label="By AI" value={(bySource.agent || 0) + (bySource.grok || 0) + (bySource.claude || 0) + (bySource.connector || 0) + (bySource.extension || 0)} icon={Sparkles} tone="p2" />
         <Stat label="Avg length" value={`${avgLength}`} icon={MessageCircle} tone="p4" hint="Characters per post" />
       </div>
       <Card>

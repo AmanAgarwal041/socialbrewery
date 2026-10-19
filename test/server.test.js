@@ -106,6 +106,8 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
 
     const signedIn = await fetch(`${base}/api/health`, as(adminToken)).then((res) => res.json());
     assert.equal(signedIn.xai, true);
+    assert.equal(signedIn.agent, 'grok');
+    assert.equal(signedIn.agentReady, true);
 
     const settings = await fetch(`${base}/api/settings`, as(adminToken)).then((res) => res.json());
     const xai = settings.managed.find((field) => field.key === 'XAI_API_KEY');

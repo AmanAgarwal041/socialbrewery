@@ -15,7 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, networkById } from '@/lib/networks'
-import type { NetworkId } from '@/lib/api'
+import { agentLabel, type NetworkId } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const TAB_LABELS: Record<string, string> = {
@@ -53,7 +53,7 @@ function StatusPills() {
   const { health } = useAppState()
   if (!health) return null
   const items = [
-    { label: 'Grok', on: health.xai },
+    { label: agentLabel(health), on: Boolean(health.agentReady) },
     ...NETWORKS.map((n) => ({ label: n.name, on: Boolean(health[`${n.id}Connected` as const]) })),
   ]
   return (

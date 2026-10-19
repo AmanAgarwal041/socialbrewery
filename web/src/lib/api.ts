@@ -14,6 +14,9 @@ export type Session =
 export type Health = {
   ok: boolean
   bootId: string
+  /** Brew's assistant, chosen in Settings, and whether its API key is set. */
+  agent?: 'grok' | 'claude'
+  agentReady?: boolean
   maxUploadMb?: number
   xai: boolean
   youtubeApp: boolean
@@ -219,10 +222,16 @@ const GUEST_READS: Record<string, unknown> = {
   '/api/posts': { posts: [] },
 }
 
+export function agentLabel(health?: Health | null) {
+  return health?.agent === 'claude' ? 'Claude' : 'Grok'
+}
+
 export function guestHealth(): Health {
   return {
     ok: true,
     bootId: 'guest',
+    agent: 'grok',
+    agentReady: false,
     maxUploadMb: 25,
     xai: false,
     youtubeApp: false,

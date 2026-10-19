@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { api, postJson, postNetwork, safeLink, timeAgo, uploadMedia, type Post, type RedditDetails, type RedditSubreddit, type SlackChannel } from '@/lib/api'
+import { agentLabel, api, postJson, postNetwork, safeLink, timeAgo, uploadMedia, type Post, type RedditDetails, type RedditSubreddit, type SlackChannel } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { SLOT_CLASSES, networkState, type NetworkMeta } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -290,7 +290,7 @@ export function NetworkPosts({ network }: { network: NetworkMeta }) {
         </div>
       ) : (
         <EmptyState icon={network.icon} title={query ? 'No matching posts' : `No ${network.name} posts yet`}>
-          {query ? 'Try a different search.' : 'Posts you publish from Socialbrewery or Grok show up here.'}
+          {query ? 'Try a different search.' : 'Posts you publish from Socialbrewery, Grok, or Claude show up here.'}
         </EmptyState>
       )}
       {editing && <EditVideoDialog post={editing} onClose={() => setEditing(null)} />}
@@ -700,7 +700,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
         </CardContent>
         <CardFooter className="justify-between gap-2">
           <Button type="button" variant="ghost" onClick={askGrok}>
-            <Sparkles /> Let Grok write it
+            <Sparkles /> Let {agentLabel(health)} write it
           </Button>
           <Button type="submit" disabled={busy}>
             {busy ? <Loader2 className="animate-spin" /> : <Upload />}{' '}

@@ -157,7 +157,7 @@ export function LandingPage() {
             <Sparkles className="size-3.5" /> A posting studio for Grok and Claude
           </span>
           <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl md:text-6xl">
-            Tell Grok what to make.{' '}
+            Tell Grok or Claude what to make.{' '}
             <span className="bg-gradient-to-r from-p1-ink via-p1 to-p3-ink bg-clip-text text-transparent">It writes, films, and posts.</span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground text-pretty sm:text-lg">
@@ -192,13 +192,13 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* Brew with Grok */}
+        {/* Brew with Grok or Claude */}
         <section id="brew" className="scroll-mt-20 border-y border-border/50 bg-card/50 py-20">
           <div className="mx-auto max-w-6xl px-4 md:px-8">
             <FeatureRow
-              eyebrow="Brew with Grok"
+              eyebrow="Brew with Grok or Claude"
               title="One sentence in, a finished post out"
-              body="Brew is a chat with an agent that can act. Ask for a Short, a LinkedIn post, an X thread, or a review of your channel, and watch each step as it happens."
+              body="Brew is a chat with an agent that can act, running on Grok or Claude, whichever your organisation picks. Ask for a Short, a LinkedIn post, an X thread, or a review of your channel, and watch each step as it happens."
               shot="/landing/brew.jpg"
               alt="The Brew chat with ready-made prompts for every network and a target picker."
               bullets={
@@ -207,7 +207,7 @@ export function LandingPage() {
                     Captions, titles, threads, articles, and announcements, shaped for each network's limits.
                   </Bullet>
                   <Bullet icon={Clapperboard} slot="p3" title="Generates the clip">
-                    Vertical 9:16 video with Grok, or attach your own mp4, mov, or webm.
+                    Vertical 9:16 video with Grok Imagine, whichever assistant you use, or attach your own mp4, mov, or webm.
                   </Bullet>
                   <Bullet icon={Send} slot="p4" title="Posts it">
                     Uploads to the accounts you connected, with every step shown live. Stop a run at any time.
@@ -251,7 +251,7 @@ export function LandingPage() {
             <FeatureRow
               eyebrow="Compose"
               title="Post by hand when you want to"
-              body="Every connector has a Compose tab with the network's own fields, and a “Let Grok write it” button when you want a first draft."
+              body="Every connector has a Compose tab with the network's own fields, and a button that asks Grok or Claude for a first draft."
               shot="/landing/compose.jpg"
               alt="The YouTube Compose tab with title, description, tags, privacy, and a video drop zone."
               flip
@@ -260,7 +260,7 @@ export function LandingPage() {
                   <Bullet icon={PenLine} slot="p2" title="The fields each network needs">
                     Shorts privacy and tags, LinkedIn link previews, X replies, Hashnode drafts, Slack threads.
                   </Bullet>
-                  <Bullet icon={Sparkles} slot="p1" title="Grok on hand">
+                  <Bullet icon={Sparkles} slot="p1" title="Grok or Claude on hand">
                     Draft with one click, then edit before it goes out.
                   </Bullet>
                 </>
@@ -274,8 +274,8 @@ export function LandingPage() {
               alt="Settings with palette choices and AI model options, including Grok or OpenAI for reviews."
               bullets={
                 <>
-                  <Bullet icon={LineChart} slot="p3" title="Grok or OpenAI">
-                    Pick the analysis provider per organisation. Posting always uses Grok.
+                  <Bullet icon={LineChart} slot="p3" title="Grok, Claude, or OpenAI">
+                    Pick who writes the reviews for each organisation, separately from who posts.
                   </Bullet>
                   <Bullet icon={Sparkles} slot="p4" title="Network stats">
                     Hashnode views and reactions, Slack reactions, Reddit score and upvote ratio.
@@ -448,7 +448,7 @@ export function LandingPage() {
           <div className="bg-palette rounded-3xl px-6 py-12 text-center text-ink sm:px-12">
             <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">Start brewing</h2>
             <p className="mx-auto mt-3 max-w-xl text-ink/75">
-              Open the app and look around first. When you’re ready, sign in, add your xAI key, and connect a network.
+              Open the app and look around first. When you’re ready, sign in, add your xAI or Anthropic key, and connect a network.
             </p>
             <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-11 w-full bg-ink px-5 text-base text-white hover:bg-ink/85 sm:w-auto">

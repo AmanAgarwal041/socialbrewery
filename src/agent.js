@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { claudeChat } from './claude.js';
 import { generateShort, grokChat } from './grok.js';
 import { analyzeVideo } from './analysis.js';
 import { listChannelVideos, publishShort, updateVideo } from './youtube.js';
@@ -9,13 +10,13 @@ import { publishInstagramReel } from './instagram.js';
 import { getMedia, loadHistory, saveHistory } from './store.js';
 import { cfg } from './context.js';
 
-const SYSTEM = `You are Grok, the posting agent inside Socialbrewery. You help one person publish to the channels they connected: YouTube Shorts, LinkedIn, Instagram Reels, X, a Hashnode blog, Slack, and Reddit.
+const SYSTEM_TEMPLATE = `You are {{NAME}}, the posting agent inside Socialbrewery. You help one person publish to the channels they connected: YouTube Shorts, LinkedIn, Instagram Reels, X, a Hashnode blog, Slack, and Reddit.
 
 You can:
 - generate_short_video: make a new vertical clip (9:16, up to 15 seconds) from a prompt.
 - upload_youtube_short: upload a clip to YouTube. Do this only when the person asked you to post, publish, or upload to YouTube.
 - list_youtube_videos: recent uploads with view, like, and comment counts.
-- analyze_youtube_video: how one video performed and what to improve. Use the 11-character video id. Pass provider openai when the person wants OpenAI to write that review.
+- analyze_youtube_video: how one video performed and what to improve. Use the 11-character video id. Pass provider claude or openai when the person wants Claude or OpenAI to write that review.
 - update_youtube_video: change the title, description, tags, or privacy of a video already on YouTube. Change only the fields the person named.
 - post_linkedin: post text, text with a link preview card (linkUrl, e.g. a YouTube video or an article), or a video with text, to LinkedIn. Use linkUrl when the person wants one link shown as a card; put other links in firstComment.
 - comment_linkedin: add a comment under an existing LinkedIn post, using its URN or link.
@@ -112,7 +113,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'analyze_youtube_video',
-      description: 'Review how one YouTube video performed and what to improve. videoId is the 11-character id. Set provider to openai when the person wants OpenAI to write the review.',
+      description: 'Review how one YouTube video performed and what to improve. videoId is the 11-character id. Set provider to claude or openai when the person wants Claude or OpenAI to write the review.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -120,8 +121,8 @@ const TOOLS = [
           videoId: { type: 'string' },
           provider: {
             type: 'string',
-            enum: ['grok', 'openai'],
-            description: 'Who writes the review. Use openai when the person asks for OpenAI. Otherwise omit it.',
+            enum: ['grok', 'claude', 'openai'],
+            description: 'Who writes the review. Use claude or openai when the person asks for one. Otherwise omit it.',
           },
         },
         required: ['videoId'],
@@ -391,11 +392,35 @@ function assistantMessage(message) {
     content: message.content ?? null,
   };
   if (message.tool_calls?.length) next.tool_calls = message.tool_calls;
+  // Claude's raw blocks (thinking included), replayed to Claude within the same request.
+  if (message._claude) next._claude = message._claude;
   return next;
 }
 
+// Brew runs on the organisation's chosen assistant. Video generation always uses Grok Imagine.
+export function agentProvider() {
+  return cfg.AGENT_PROVIDER === 'claude' ? 'claude' : 'grok';
+}
+
+export function agentName() {
+  return agentProvider() === 'claude' ? 'Claude' : 'Grok';
+}
+
+function systemPrompt() {
+  return SYSTEM_TEMPLATE.replace('{{NAME}}', agentName());
+}
+
+// Grok gets the plain OpenAI shape; Claude's extra field stays out of its requests.
+function forGrok(messages) {
+  return messages.map(({ _claude, ...rest }) => rest);
+}
+
 export async function runAgent({ text, mediaId, privacyStatus, madeForKids, send, signal }) {
-  if (!cfg.XAI_API_KEY) {
+  const provider = agentProvider();
+  if (provider === 'claude' && !cfg.ANTHROPIC_API_KEY) {
+    throw new Error('Add your Anthropic API key in Settings (an organisation admin can do this), or switch the assistant to Grok.');
+  }
+  if (provider === 'grok' && !cfg.XAI_API_KEY) {
     throw new Error('Add your xAI API key in Settings (an organisation admin can do this).');
   }
   const spoken = String(text || '').trim() || (mediaId ? 'Post the attached video as a YouTube Short.' : '');
@@ -430,11 +455,9 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, send
 
   for (let step = 0; step < 5; step += 1) {
     if (signal?.aborted) throw new Error('Stopped.');
-    send('status', { text: step === 0 ? 'Grok is thinking…' : 'Grok is continuing…' });
-    const message = await grokChat({
-      messages: [{ role: 'system', content: SYSTEM }, ...history.model],
-      tools: TOOLS,
-    });
+    send('status', { text: step === 0 ? `${agentName()} is thinking…` : `${agentName()} is continuing…` });
+    const messages = [{ role: 'system', content: systemPrompt() }, ...history.model];
+    const message = provider === 'claude' ? await claudeChat({ messages, tools: TOOLS }) : await grokChat({ messages: forGrok(messages), tools: TOOLS });
     history.model.push(assistantMessage(message));
     if (message.content) {
       const item = {

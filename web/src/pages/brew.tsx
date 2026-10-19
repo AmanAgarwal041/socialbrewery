@@ -34,7 +34,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
+import { agentLabel, api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, type Slot } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -237,7 +237,7 @@ function ToolCard({ item }: { item: ChatItem }) {
   )
 }
 
-function Thinking({ status }: { status: string }) {
+function Thinking({ status, agent }: { status: string; agent: string }) {
   return (
     <div className="flex gap-3">
       <Avatar />
@@ -247,13 +247,13 @@ function Thinking({ status }: { status: string }) {
           <span className="typing-dot size-1.5 rounded-full bg-p3-ink" />
           <span className="typing-dot size-1.5 rounded-full bg-p2-ink" />
         </span>
-        <span className="text-muted-foreground">{status || 'Grok is thinking…'}</span>
+        <span className="text-muted-foreground">{status || `${agent} is thinking…`}</span>
       </div>
     </div>
   )
 }
 
-function EmptyChat({ onPick, grokReady }: { onPick: (prompt: string, target: NetworkId | 'any') => void; grokReady: boolean }) {
+function EmptyChat({ onPick, agent, ready }: { onPick: (prompt: string, target: NetworkId | 'any') => void; agent: string; ready: boolean }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-4 py-10 text-center">
       <div className="bg-palette mb-5 flex size-16 items-center justify-center rounded-3xl text-ink shadow-md">
@@ -261,12 +261,12 @@ function EmptyChat({ onPick, grokReady }: { onPick: (prompt: string, target: Net
       </div>
       <h1 className="text-3xl font-semibold tracking-tight">What should we brew today?</h1>
       <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-        Ask Grok to generate a vertical clip, write the copy, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit.
+        Ask {agent} to write the copy, generate a vertical clip, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit.
         Attach a video to post your own.
       </p>
-      {!grokReady && (
+      {!ready && (
         <p className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Add your xAI API key in Settings before chatting.
+          Add your {agent === 'Claude' ? 'Anthropic' : 'xAI'} API key in Settings before chatting.
         </p>
       )}
       <div className="mt-8 grid w-full gap-3 sm:grid-cols-2 sm:[&>*:last-child:nth-child(odd)]:col-span-2">
@@ -295,7 +295,7 @@ function EmptyChat({ onPick, grokReady }: { onPick: (prompt: string, target: Net
   )
 }
 
-function TargetPicker({ value, onChange }: { value: NetworkId | 'any'; onChange: (v: NetworkId | 'any') => void }) {
+function TargetPicker({ value, onChange, agent }: { value: NetworkId | 'any'; onChange: (v: NetworkId | 'any') => void; agent: string }) {
   const options: { id: NetworkId | 'any'; label: string; icon: Icon; slot: Slot }[] = [
     { id: 'any', label: 'Ask me', icon: Sparkles, slot: 'p4' },
     ...NETWORKS.map((n) => ({ id: n.id, label: n.name, icon: n.icon, slot: n.slot })),
@@ -321,7 +321,7 @@ function TargetPicker({ value, onChange }: { value: NetworkId | 'any'; onChange:
                 <span className="hidden sm:inline">{o.label}</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent>{o.id === 'any' ? 'Grok asks which network' : `Post to ${o.label}`}</TooltipContent>
+            <TooltipContent>{o.id === 'any' ? `${agent} asks which network` : `Post to ${o.label}`}</TooltipContent>
           </Tooltip>
         )
       })}
@@ -331,6 +331,7 @@ function TargetPicker({ value, onChange }: { value: NetworkId | 'any'; onChange:
 
 export function BrewPage() {
   const { health, refreshPosts } = useAppState()
+  const agent = agentLabel(health)
   const location = useLocation()
   const navigate = useNavigate()
   const [items, setItems] = useState<ChatItem[] | null>(null)
@@ -398,7 +399,7 @@ export function BrewPage() {
     const message = network && !mentions ? `[${network.name}] ${raw || `Post the attached video to ${network.name}.`}` : raw
 
     setBusy(true)
-    setStatus(file ? 'Uploading video…' : 'Grok is thinking…')
+    setStatus(file ? 'Uploading video…' : `${agent} is thinking…`)
     const controller = new AbortController()
     abortRef.current = controller
     try {
@@ -417,7 +418,7 @@ export function BrewPage() {
       })
       if (!res.ok || !res.headers.get('content-type')?.includes('text/event-stream')) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Grok could not start.')
+        throw new Error(data.error || `${agent} could not start.`)
       }
       setText('')
       setFile(null)
@@ -435,7 +436,7 @@ export function BrewPage() {
       await readSse(res, (event, data) => {
         if (event === 'status') setStatus(data.text || '')
         if (event === 'message') setItems((prev) => [...(prev || []), data as ChatItem])
-        if (event === 'error') toast.error(data.error || 'Grok could not finish that.')
+        if (event === 'error') toast.error(data.error || `${agent} could not finish that.`)
       })
       await loadHistory()
       refreshPosts().catch(() => {})
@@ -466,7 +467,8 @@ export function BrewPage() {
   } else if (empty && !busy) {
     body = (
       <EmptyChat
-        grokReady={Boolean(health?.xai ?? true)}
+        agent={agent}
+        ready={Boolean(health?.agentReady ?? true)}
         onPick={(prompt, t) => {
           setText(prompt)
           setTarget(t)
@@ -486,7 +488,7 @@ export function BrewPage() {
             <AssistantBubble key={item.id} item={item} />
           ),
         )}
-        {busy && <Thinking status={status} />}
+        {busy && <Thinking status={status} agent={agent} />}
       </div>
     )
   }
@@ -512,7 +514,7 @@ export function BrewPage() {
       <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-background/40 px-4 py-2.5 backdrop-blur">
         <div className="flex items-center gap-2 text-sm">
           <Sparkles className="size-4 text-p1-ink" />
-          <span className="font-medium">Brew with Grok</span>
+          <span className="font-medium">Brew with {agent}</span>
           <span className="hidden text-muted-foreground sm:inline">· generates clips, writes copy, and posts for you</span>
         </div>
         <AlertDialog>
@@ -525,7 +527,7 @@ export function BrewPage() {
             <AlertDialogHeader>
               <AlertDialogTitle>Start a new chat?</AlertDialogTitle>
               <AlertDialogDescription>
-                This clears the conversation with Grok. Posts already published stay in your library.
+                This clears the conversation with {agent}. Posts already published stay in your library.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -564,7 +566,7 @@ export function BrewPage() {
             </div>
           )}
           <label htmlFor="brew-input" className="sr-only">
-            Message Grok
+            Message {agent}
           </label>
           <textarea
             id="brew-input"
@@ -601,7 +603,7 @@ export function BrewPage() {
               </TooltipTrigger>
               <TooltipContent>Attach a video (or drop it here)</TooltipContent>
             </Tooltip>
-            <TargetPicker value={target} onChange={setTarget} />
+            <TargetPicker value={target} onChange={setTarget} agent={agent} />
             {showYoutubeOptions && (
               <div className="flex items-center gap-2">
                 <Select value={privacy} onValueChange={setPrivacy}>

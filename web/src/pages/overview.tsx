@@ -5,7 +5,7 @@ import { EmptyState, Stat } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { postNetwork, safeImage, safeLink, timeAgo, type Post } from '@/lib/api'
+import { agentLabel, postNetwork, safeImage, safeLink, timeAgo, type Post } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, networkState } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -37,16 +37,17 @@ export function PostRow({ post }: { post: Post }) {
 }
 
 function QuickBrew() {
+  const { health } = useAppState()
   const navigate = useNavigate()
   const [text, setText] = useState('')
   return (
     <Card className="bg-palette relative overflow-hidden border-0 shadow-md">
       <CardContent className="relative p-6 md:p-8">
         <div className="flex items-center gap-2 text-sm font-medium text-ink/80">
-          <Sparkles className="size-4" /> Brew with Grok
+          <Sparkles className="size-4" /> Brew with {agentLabel(health)}
         </div>
         <h2 className="mt-2 max-w-xl text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-          Tell Grok what to make. It writes, generates, and posts.
+          Tell {agentLabel(health)} what to make. It writes, generates, and posts.
         </h2>
         <form
           className="mt-5 flex max-w-2xl items-center gap-2 rounded-2xl bg-white/80 p-1.5 shadow-sm backdrop-blur focus-within:ring-4 focus-within:ring-white/60"
@@ -78,7 +79,7 @@ export function OverviewPage() {
   const byGrok = posts?.filter((p) => ['agent', 'grok', 'claude', 'connector', 'extension'].includes(p.source || '')).length ?? 0
 
   const setup = [
-    { done: Boolean(health?.xai), label: 'Add your xAI API key', to: '/settings' },
+    { done: Boolean(health?.agentReady), label: `Add your ${health?.agent === 'claude' ? 'Anthropic' : 'xAI'} API key`, to: '/settings' },
     { done: Boolean(health?.youtubeConnected), label: 'Connect YouTube', to: '/connectors/youtube/connection' },
     { done: Boolean(health?.linkedinConnected), label: 'Connect LinkedIn', to: '/connectors/linkedin/connection' },
     { done: Boolean(health?.instagramConnected), label: 'Connect Instagram', to: '/connectors/instagram/connection' },
@@ -159,7 +160,7 @@ export function OverviewPage() {
               </div>
             ) : (
               <EmptyState icon={Send} title="Nothing posted yet" action={<Button asChild><Link to="/brew">Brew your first post</Link></Button>}>
-                Ask Grok in Brew, or compose a post from any connector page.
+                Ask {agentLabel(health)} in Brew, or compose a post from any connector page.
               </EmptyState>
             )}
           </CardContent>

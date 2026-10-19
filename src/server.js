@@ -18,7 +18,7 @@ import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken 
 import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
 import { cfg, currentContext, runWithOrg } from './context.js';
 import { sign, verifySignature } from './secure.js';
-import { runAgent } from './agent.js';
+import { agentProvider, runAgent } from './agent.js';
 import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
@@ -218,6 +218,9 @@ async function health() {
     ok: true,
     bootId: bootId(),
     xai: Boolean(cfg.XAI_API_KEY),
+    // Brew's assistant and whether its key is set. Clips always need the xAI key.
+    agent: agentProvider(),
+    agentReady: agentProvider() === 'claude' ? Boolean(cfg.ANTHROPIC_API_KEY) : Boolean(cfg.XAI_API_KEY),
     youtubeApp: Boolean(cfg.YOUTUBE_CLIENT_ID && cfg.YOUTUBE_CLIENT_SECRET),
     youtubeConnected: youtube.connected,
     linkedinApp: Boolean(cfg.LINKEDIN_CLIENT_ID && cfg.LINKEDIN_CLIENT_SECRET),
