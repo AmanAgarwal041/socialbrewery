@@ -14,7 +14,8 @@
     "web:build": "npm --prefix web install && npm --prefix web run build",
     "tunnel": "cloudflared tunnel --config cloudflare/config.yml run",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "wrangler deploy",
+    "ext:build": "npm --prefix extension install && npm --prefix extension run build"
   },
   "devDependencies": {
     "wrangler": "^4.150.0"

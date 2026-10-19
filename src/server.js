@@ -14,7 +14,8 @@ import {
   rotateConnectorToken,
   saveOrgConfig,
 } from './accounts.js';
-import { clerkConfigured, clerkPublishableKey, verifySessionToken } from './clerk.js';
+import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken } from './clerk.js';
+import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
 import { cfg, currentContext, runWithOrg } from './context.js';
 import { sign, verifySignature } from './secure.js';
 import { runAgent } from './agent.js';
@@ -256,6 +257,7 @@ function cookies(req) {
 // Browsers send Origin on state-changing requests; anything from another site is refused.
 function sameOrigin(req) {
   const origin = req.headers.origin;
+  if (origin && extraOrigins().includes(origin)) return true;
   if (origin) return origin === new URL(appUrl()).origin || origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`;
   return req.headers['sec-fetch-site'] === 'same-origin';
 }
@@ -592,6 +594,16 @@ async function orgRoute(req, res, url, ctx) {
   // Members, roles, invites, and the organisation's name are managed in Clerk.
   if (req.method === 'GET' && pathname === '/api/org') {
     sendJson(res, 200, { org: ctx.org, role: ctx.role });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/extension/runs') {
+    sendJson(res, 200, await loadExtensionRuns(ctx.user?.id));
+    return;
+  }
+
+  if (req.method === 'PUT' && pathname === '/api/extension/runs') {
+    sendJson(res, 200, await mergeExtensionRuns(ctx.user?.id, await readJsonBody(req)));
     return;
   }
 

@@ -32,7 +32,10 @@
 
   "vars": {
     // Public address of the app: the workers.dev URL or your custom domain. OAuth redirects start with it.
-    "APP_URL": "https://socialbrewery.agarwal-aman041.workers.dev"
+    "APP_URL": "https://socialbrewery.agarwal-aman041.workers.dev",
+    // The Chrome extension (extension/) signs in with this app's Clerk sessions; its id comes from the
+    // key in extension/public/manifest.json.
+    "CLERK_AUTHORIZED_PARTIES": "chrome-extension://lbpmjaljdakmemfoapiecnocaimlekjm"
     // Clerk's publishable key is public, so it can live here instead of in a secret:
     // "CLERK_PUBLISHABLE_KEY": "pk_live_..."
   }

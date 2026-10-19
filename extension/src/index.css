@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* The dashboard's palette (web/src/theme.ts): four swatches, everything else mixed from them. */
+@theme inline {
+  --color-p1: var(--p1);
+  --color-p2: var(--p2);
+  --color-p3: var(--p3);
+  --color-p4: var(--p4);
+  --color-p1-soft: var(--p1-soft);
+  --color-p2-soft: var(--p2-soft);
+  --color-p4-soft: var(--p4-soft);
+  --color-p1-ink: var(--p1-ink);
+  --color-p2-ink: var(--p2-ink);
+  --color-p4-ink: var(--p4-ink);
+  --color-ink: var(--ink);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+:root {
+  --p1: #9fa1ff;
+  --p2: #b5baff;
+  --p3: #aee2ff;
+  --p4: #d9f9df;
+  --ink: color-mix(in oklab, var(--p1) 14%, #14122a);
+  --p1-soft: color-mix(in oklab, var(--p1) 22%, #ffffff);
+  --p2-soft: color-mix(in oklab, var(--p2) 26%, #ffffff);
+  --p4-soft: color-mix(in oklab, var(--p4) 45%, #ffffff);
+  --p1-ink: color-mix(in oklab, var(--p1) 45%, var(--ink));
+  --p2-ink: color-mix(in oklab, var(--p2) 40%, var(--ink));
+  --p4-ink: color-mix(in oklab, var(--p4) 30%, var(--ink));
+  --background: color-mix(in oklab, var(--p2) 7%, #ffffff);
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --muted: color-mix(in oklab, var(--p2) 12%, #ffffff);
+  --muted-foreground: color-mix(in oklab, var(--ink) 60%, #ffffff);
+  --border: color-mix(in oklab, var(--p2) 32%, #ffffff);
+  --danger: #b4233c;
+  --danger-soft: #fde8ec;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: color-mix(in oklab, var(--p1) 10%, #f4f3ff);
+    --p1-soft: color-mix(in oklab, var(--p1) 26%, #15142a);
+    --p2-soft: color-mix(in oklab, var(--p2) 22%, #15142a);
+    --p4-soft: color-mix(in oklab, var(--p4) 18%, #15142a);
+    --p1-ink: color-mix(in oklab, var(--p1) 70%, #ffffff);
+    --p2-ink: color-mix(in oklab, var(--p2) 70%, #ffffff);
+    --p4-ink: color-mix(in oklab, var(--p4) 75%, #ffffff);
+    --background: #121124;
+    --foreground: var(--ink);
+    --card: #1b1a33;
+    --muted: #24233f;
+    --muted-foreground: color-mix(in oklab, var(--ink) 62%, #121124);
+    --border: #2f2d52;
+    --danger: #ff8fa3;
+    --danger-soft: #3a1622;
+    color-scheme: dark;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.bg-palette {
+  background: linear-gradient(135deg, var(--p1), var(--p3));
+}

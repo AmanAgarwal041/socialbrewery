@@ -91,9 +91,13 @@ async function keyFor(kid) {
   return key;
 }
 
+// Other origins that may use this app's sessions, such as the Chrome extension (chrome-extension://<id>).
+export function extraOrigins() {
+  return env('CLERK_AUTHORIZED_PARTIES').split(',').map((v) => v.trim().replace(/\/$/, '')).filter(Boolean);
+}
+
 function authorizedParties(requestOrigins) {
-  const extra = env('CLERK_AUTHORIZED_PARTIES').split(',').map((v) => v.trim().replace(/\/$/, '')).filter(Boolean);
-  return new Set([new URL(appUrl()).origin, ...requestOrigins, ...extra]);
+  return new Set([new URL(appUrl()).origin, ...requestOrigins, ...extraOrigins()]);
 }
 
 // Clerk's v2 tokens carry the active organisation as o.{id, rol}; v1 tokens use org_id and org_role ("org:admin").

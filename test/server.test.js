@@ -58,7 +58,7 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
   let logs = '';
   const proc = spawn(process.execPath, ['src/server.js'], {
     cwd: root,
-    env: { ...process.env, ...clerkEnv, CLERK_SECRET_KEY: '', SOCIALBREWERY_HOME: temp },
+    env: { ...process.env, ...clerkEnv, CLERK_SECRET_KEY: '', CLERK_AUTHORIZED_PARTIES: 'chrome-extension://testextension', SOCIALBREWERY_HOME: temp },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -152,6 +152,28 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     const orgInfo = await fetch(`${base}/api/org`, as(adminToken)).then((res) => res.json());
     assert.deepEqual(orgInfo, { org: { id: org.id, name: 'Brewery' }, role: 'admin' });
     assert.equal((await fetch(`${base}/api/org/invites`, as(adminToken, { method: 'POST', body: '{}' }))).status, 404);
+
+    // The Chrome extension saves runs per person, and posts it records show up in the organisation's Posts.
+    const ext = 'chrome-extension://testextension';
+    const extToken = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: ext });
+    const fromExtension = (body, token = extToken, origin = ext) =>
+      fetch(`${base}/api/extension/runs`, { method: 'PUT', headers: { Origin: origin, 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    const run = { id: 'run-1', title: 'LinkedIn launch', provider: 'claude', status: 'done', createdAt: 1, updatedAt: 10, steps: [{ kind: 'user', text: 'Post it', at: 1 }], posts: [{ network: 'LinkedIn', url: 'https://www.linkedin.com/feed/update/urn:li:share:1', title: 'Launch post', at: 5 }] };
+    assert.equal((await fromExtension({ runs: [run] })).status, 200);
+    assert.equal((await fromExtension({ runs: [{ ...run, title: 'older copy', updatedAt: 5 }] })).status, 200);
+    const savedRuns = await fetch(`${base}/api/extension/runs`, { headers: { Authorization: `Bearer ${extToken}` } }).then((res) => res.json());
+    assert.equal(savedRuns.runs.length, 1);
+    assert.equal(savedRuns.runs[0].title, 'LinkedIn launch');
+    const orgPosts = await fetch(`${base}/api/posts`, as(adminToken)).then((res) => res.json());
+    assert.equal(orgPosts.posts.filter((p) => p.source === 'extension').length, 1);
+    assert.equal(orgPosts.posts.find((p) => p.source === 'extension').network, 'linkedin');
+    const others = await fetch(`${base}/api/extension/runs`, as(memberToken)).then((res) => res.json());
+    assert.deepEqual(others.runs, []);
+    assert.equal((await fromExtension({ runs: [], deleted: ['run-1'] })).status, 200);
+    assert.equal((await fromExtension({ runs: [run] })).status, 200);
+    assert.deepEqual((await fetch(`${base}/api/extension/runs`, { headers: { Authorization: `Bearer ${extToken}` } }).then((res) => res.json())).runs, []);
+    const strangerExt = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: 'chrome-extension://someoneelse' });
+    assert.equal((await fromExtension({ runs: [run] }, strangerExt, 'chrome-extension://someoneelse')).status, 403);
 
     // Connecting a network: the callback can arrive after the Clerk token expired, so the connect step
     // leaves a signed ticket for that organisation. Without it, a callback is not signed in.
