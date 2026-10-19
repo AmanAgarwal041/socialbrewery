@@ -17,7 +17,7 @@ export const ORG_FIELDS = [
     key: 'AGENT_PROVIDER',
     label: 'Assistant',
     secret: false,
-    help: 'Who runs Brew and writes drafts: grok or claude. Video clips are always generated with Grok.',
+    help: 'Who runs Brew by default and writes drafts: grok or claude. Brew\'s Grok/Claude tabs switch per message. Video clips are always generated with Grok.',
   },
   {
     key: 'XAI_API_KEY',

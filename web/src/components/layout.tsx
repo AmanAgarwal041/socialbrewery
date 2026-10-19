@@ -15,7 +15,8 @@ import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, networkById } from '@/lib/networks'
-import { agentLabel, type NetworkId } from '@/lib/api'
+import { type NetworkId } from '@/lib/api'
+import { useAssistant } from '@/lib/assistant'
 import { cn } from '@/lib/utils'
 
 const TAB_LABELS: Record<string, string> = {
@@ -51,9 +52,10 @@ function crumbs(pathname: string): { label: string; to?: string }[] {
 
 function StatusPills() {
   const { health } = useAppState()
+  const assistant = useAssistant(health)
   if (!health) return null
   const items = [
-    { label: agentLabel(health), on: Boolean(health.agentReady) },
+    { label: assistant.label, on: assistant.ready },
     ...NETWORKS.map((n) => ({ label: n.name, on: Boolean(health[`${n.id}Connected` as const]) })),
   ]
   return (

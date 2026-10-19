@@ -188,7 +188,7 @@ export function LandingPage() {
         <section className="mx-auto max-w-6xl px-4 pb-20 md:px-8">
           <div className="relative">
             <div className="bg-palette absolute -inset-x-6 -inset-y-6 -z-10 rounded-[2.5rem] opacity-40 blur-3xl" aria-hidden />
-            <Shot src="/landing/overview.jpg" alt="The Socialbrewery overview: a Brew with Grok prompt, post counts, and every network." priority />
+            <Shot src="/landing/overview.jpg" alt="The Socialbrewery overview: a Brew prompt with Grok and Claude tabs, post counts, and every network." priority />
           </div>
         </section>
 
@@ -200,7 +200,7 @@ export function LandingPage() {
               title="One sentence in, a finished post out"
               body="Brew is a chat with an agent that can act, running on Grok or Claude, whichever your organisation picks. Ask for a Short, a LinkedIn post, an X thread, or a review of your channel, and watch each step as it happens."
               shot="/landing/brew.jpg"
-              alt="The Brew chat with ready-made prompts for every network and a target picker."
+              alt="The Brew chat with Grok and Claude tabs under the text area, ready-made prompts for every network, and a target picker."
               bullets={
                 <>
                   <Bullet icon={PenLine} slot="p1" title="Writes the copy">
@@ -271,7 +271,7 @@ export function LandingPage() {
               title="Learn what worked"
               body="YouTube Analysis shows channel stats and asks AI to review each video: what landed, what didn't, and what to change next."
               shot="/landing/settings.jpg"
-              alt="Settings with palette choices and AI model options, including Grok or OpenAI for reviews."
+              alt="Settings with palette choices and AI model options: Grok or Claude for Brew, and Grok, Claude, or OpenAI for reviews."
               bullets={
                 <>
                   <Bullet icon={LineChart} slot="p3" title="Grok, Claude, or OpenAI">
@@ -337,7 +337,7 @@ export function LandingPage() {
                 </Bullet>
               </ul>
             </div>
-            <Shot src="/landing/mcp-connector.jpg" alt="The Grok connector page with setup steps and the list of MCP tools." />
+            <Shot src="/landing/mcp-connector.jpg" alt="The Claude connector page with setup steps and the list of MCP tools Claude can use." />
           </div>
         </section>
 

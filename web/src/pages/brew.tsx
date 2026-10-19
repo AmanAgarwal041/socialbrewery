@@ -34,7 +34,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { agentLabel, api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
+import { api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
+import { useAssistant } from '@/lib/assistant'
+import { AssistantTabs } from '@/components/assistant-tabs'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, type Slot } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -262,7 +264,7 @@ function EmptyChat({ onPick, agent, ready }: { onPick: (prompt: string, target: 
       <h1 className="text-3xl font-semibold tracking-tight">What should we brew today?</h1>
       <p className="mt-2 max-w-lg text-sm text-muted-foreground">
         Ask {agent} to write the copy, generate a vertical clip, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit.
-        Attach a video to post your own.
+        Attach a video to post your own.{agent === 'Claude' && ' Clips are still generated with Grok Imagine, so that needs your xAI key.'}
       </p>
       {!ready && (
         <p className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -331,7 +333,8 @@ function TargetPicker({ value, onChange, agent }: { value: NetworkId | 'any'; on
 
 export function BrewPage() {
   const { health, refreshPosts } = useAppState()
-  const agent = agentLabel(health)
+  const assistant = useAssistant(health)
+  const agent = assistant.label
   const location = useLocation()
   const navigate = useNavigate()
   const [items, setItems] = useState<ChatItem[] | null>(null)
@@ -413,7 +416,7 @@ export function BrewPage() {
       const res = await authedFetch('/api/agent/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: message, mediaId, privacyStatus: privacy, madeForKids: kids }),
+        body: JSON.stringify({ text: message, mediaId, privacyStatus: privacy, madeForKids: kids, provider: assistant.id }),
         signal: controller.signal,
       })
       if (!res.ok || !res.headers.get('content-type')?.includes('text/event-stream')) {
@@ -468,7 +471,7 @@ export function BrewPage() {
     body = (
       <EmptyChat
         agent={agent}
-        ready={Boolean(health?.agentReady ?? true)}
+        ready={health ? assistant.ready : true}
         onPick={(prompt, t) => {
           setText(prompt)
           setTarget(t)
@@ -581,10 +584,11 @@ export function BrewPage() {
                 send()
               }
             }}
-            placeholder={dragging ? 'Drop the video to attach it' : 'Describe a Short, a post, or ask how your videos did…'}
+            placeholder={dragging ? 'Drop the video to attach it' : `Tell ${agent} what to make: a Short, a post, or ask how your videos did…`}
             className="block max-h-56 w-full resize-none bg-transparent px-4 pt-4 pb-2 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
           <div className="flex flex-wrap items-center gap-2 px-3 pb-3">
+            <AssistantTabs value={assistant.id} onChange={assistant.set} health={health} disabled={busy} />
             <input
               ref={fileRef}
               type="file"

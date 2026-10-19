@@ -17,11 +17,11 @@
   <a href="#start">Run it yourself</a>
 </p>
 
-![The Socialbrewery overview: a Brew with Grok prompt, post counts, and every network](public/landing/overview.jpg)
+![The Socialbrewery overview: a Brew prompt with Grok and Claude tabs, post counts, and every network](public/landing/overview.jpg)
 
 ## Why Socialbrewery
 
-- **Brew with Grok.** Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
+- **Brew with Grok or Claude.** Pick the assistant with the small tabs under the text box; switching relabels the page and sends your next message to that model. Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
 - **Seven networks, one dashboard.** Each network has Overview, Posts, Compose, Analysis, and Connection tabs, so you can also post by hand.
 - **AI performance reviews.** YouTube Analysis shows channel stats and reviews each video with Grok, Claude, or OpenAI.
 - **Built for teams.** Organisations and roles (admin, member) via Clerk. Every organisation's keys and account tokens are encrypted with AES-256-GCM and never sent back to the browser.
@@ -44,8 +44,8 @@
 
 | | |
 |---|---|
-| ![Brew: chat with Grok, with ready-made prompts for every network](public/landing/brew.jpg) | ![Compose: the YouTube Compose tab with a "Let Grok write it" button](public/landing/compose.jpg) |
-| **Brew.** Chat with Grok, pick a target network, attach a video, and watch each step. | **Compose.** Post by hand with each network's own fields. |
+| ![Brew: chat with Grok or Claude, with ready-made prompts for every network](public/landing/brew.jpg) | ![Compose: the YouTube Compose tab with a "Let Grok write it" button](public/landing/compose.jpg) |
+| **Brew.** Chat with Grok or Claude (switch with the tabs under the text box), pick a target network, attach a video, and watch each step. | **Compose.** Post by hand with each network's own fields. |
 | ![Connectors: every network with its status](public/landing/connectors.jpg) | ![Connection: setup steps and the redirect URI for YouTube](public/landing/connection.jpg) |
 | **Connectors.** Every network and its status at a glance. | **Connection.** Exact setup steps and the redirect URI to paste. |
 | ![Grok connector: the MCP connector URL and its tools](public/landing/mcp-connector.jpg) | ![Settings: palette and AI models, including Grok or OpenAI for reviews](public/landing/settings.jpg) |

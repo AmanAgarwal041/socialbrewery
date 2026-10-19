@@ -17,6 +17,8 @@ export type Health = {
   /** Brew's assistant, chosen in Settings, and whether its API key is set. */
   agent?: 'grok' | 'claude'
   agentReady?: boolean
+  /** Whether each assistant's API key is set (drives the Grok/Claude tabs). */
+  agents?: { grok: boolean; claude: boolean }
   maxUploadMb?: number
   xai: boolean
   youtubeApp: boolean
@@ -232,6 +234,7 @@ export function guestHealth(): Health {
     bootId: 'guest',
     agent: 'grok',
     agentReady: false,
+    agents: { grok: false, claude: false },
     maxUploadMb: 25,
     xai: false,
     youtubeApp: false,

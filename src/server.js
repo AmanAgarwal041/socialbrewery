@@ -18,7 +18,7 @@ import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken 
 import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
 import { cfg, currentContext, runWithOrg } from './context.js';
 import { sign, verifySignature } from './secure.js';
-import { agentProvider, runAgent } from './agent.js';
+import { AGENT_PROVIDERS, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
 import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
@@ -220,7 +220,9 @@ async function health() {
     xai: Boolean(cfg.XAI_API_KEY),
     // Brew's assistant and whether its key is set. Clips always need the xAI key.
     agent: agentProvider(),
-    agentReady: agentProvider() === 'claude' ? Boolean(cfg.ANTHROPIC_API_KEY) : Boolean(cfg.XAI_API_KEY),
+    agentReady: agentsReady()[agentProvider()],
+    // Per-assistant readiness for the Grok/Claude tabs under Brew's text area.
+    agents: agentsReady(),
     youtubeApp: Boolean(cfg.YOUTUBE_CLIENT_ID && cfg.YOUTUBE_CLIENT_SECRET),
     youtubeConnected: youtube.connected,
     linkedinApp: Boolean(cfg.LINKEDIN_CLIENT_ID && cfg.LINKEDIN_CLIENT_SECRET),
@@ -1166,8 +1168,11 @@ async function orgRoute(req, res, url, ctx) {
   }
 
   if (req.method === 'POST' && pathname === '/api/agent/message') {
-    if (busyOrgs.has(ctx.org.id)) throw fail('Grok is already working on a request for this organisation.', 409);
+    if (busyOrgs.has(ctx.org.id)) throw fail('Brew is already working on a request for this organisation.', 409);
     const body = await readJsonBody(req);
+    // The Grok/Claude tab the message was written in; omitted means the organisation's default.
+    const provider = body.provider == null || body.provider === '' ? undefined : String(body.provider);
+    if (provider !== undefined && !AGENT_PROVIDERS.includes(provider)) throw fail('Assistant must be grok or claude.');
     const text = String(body.text || '').trim();
     if (text.length > 8000) throw fail('That message is too long.');
     const mediaId = body.mediaId ? String(body.mediaId) : '';
@@ -1198,13 +1203,14 @@ async function orgRoute(req, res, url, ctx) {
         mediaId,
         privacyStatus: body.privacyStatus,
         madeForKids: Boolean(body.madeForKids),
+        provider,
         send,
         signal: controller.signal,
       });
       send('done', { ok: true });
     } catch (err) {
       if (!started) throw err;
-      send('error', { error: err.message || 'Grok could not finish that.' });
+      send('error', { error: err.message || `${agentName(provider)} could not finish that.` });
     } finally {
       clearInterval(heartbeat);
       busyOrgs.delete(ctx.org.id);

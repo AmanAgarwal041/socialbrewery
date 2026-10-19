@@ -29,7 +29,8 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { agentLabel, safeImage } from '@/lib/api'
+import { safeImage } from '@/lib/api'
+import { useAssistant } from '@/lib/assistant'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkState } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -165,6 +166,7 @@ function UserMenu() {
 
 export function AppSidebar() {
   const { health, connectors, posts, guest } = useAppState()
+  const assistant = useAssistant(health)
   const { pathname } = useLocation()
 
   return (
@@ -190,13 +192,13 @@ export function AppSidebar() {
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname.startsWith('/brew')} tooltip={`Brew with ${agentLabel(health)}`}>
+              <SidebarMenuButton asChild isActive={pathname.startsWith('/brew')} tooltip={`Brew with ${assistant.label}`}>
                 <NavLink to="/brew">
                   <Sparkles />
                   <span>Brew</span>
                 </NavLink>
               </SidebarMenuButton>
-              {!health?.agentReady && health && <SidebarMenuBadge className="text-destructive">key</SidebarMenuBadge>}
+              {!assistant.ready && health && <SidebarMenuBadge className="text-destructive">key</SidebarMenuBadge>}
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={pathname.startsWith('/extension')} tooltip="Chrome extension">

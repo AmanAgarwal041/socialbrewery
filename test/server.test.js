@@ -108,6 +108,22 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal(signedIn.xai, true);
     assert.equal(signedIn.agent, 'grok');
     assert.equal(signedIn.agentReady, true);
+    // Per-assistant readiness drives the Grok/Claude tabs under Brew's text area.
+    assert.deepEqual(signedIn.agents, { grok: true, claude: false });
+
+    // A message can pick its assistant; unknown ones are refused before anything runs.
+    const badProvider = await fetch(`${base}/api/agent/message`, as(adminToken, {
+      method: 'POST',
+      body: JSON.stringify({ text: 'hello', provider: 'gpt' }),
+    }));
+    assert.equal(badProvider.status, 400);
+    // Picking Claude without an Anthropic key says so instead of falling back to Grok.
+    const claudeNoKey = await fetch(`${base}/api/agent/message`, as(adminToken, {
+      method: 'POST',
+      body: JSON.stringify({ text: 'hello', provider: 'claude' }),
+    })).then((res) => res.text());
+    assert.match(claudeNoKey, /event: error/);
+    assert.match(claudeNoKey, /Anthropic API key/);
 
     const settings = await fetch(`${base}/api/settings`, as(adminToken)).then((res) => res.json());
     const xai = settings.managed.find((field) => field.key === 'XAI_API_KEY');

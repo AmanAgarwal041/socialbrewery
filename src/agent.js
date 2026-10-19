@@ -397,17 +397,26 @@ function assistantMessage(message) {
   return next;
 }
 
-// Brew runs on the organisation's chosen assistant. Video generation always uses Grok Imagine.
-export function agentProvider() {
+// Brew runs on the organisation's chosen assistant unless a message picks one (the Grok/Claude
+// tabs under Brew's text area). Video generation always uses Grok Imagine.
+export const AGENT_PROVIDERS = ['grok', 'claude'];
+
+export function agentProvider(requested) {
+  if (AGENT_PROVIDERS.includes(requested)) return requested;
   return cfg.AGENT_PROVIDER === 'claude' ? 'claude' : 'grok';
 }
 
-export function agentName() {
-  return agentProvider() === 'claude' ? 'Claude' : 'Grok';
+export function agentName(provider = agentProvider()) {
+  return provider === 'claude' ? 'Claude' : 'Grok';
 }
 
-function systemPrompt() {
-  return SYSTEM_TEMPLATE.replace('{{NAME}}', agentName());
+/** Whether each assistant has its API key, so the tabs can say which one is ready. */
+export function agentsReady() {
+  return { grok: Boolean(cfg.XAI_API_KEY), claude: Boolean(cfg.ANTHROPIC_API_KEY) };
+}
+
+function systemPrompt(provider) {
+  return SYSTEM_TEMPLATE.replace('{{NAME}}', agentName(provider));
 }
 
 // Grok gets the plain OpenAI shape; Claude's extra field stays out of its requests.
@@ -415,8 +424,8 @@ function forGrok(messages) {
   return messages.map(({ _claude, ...rest }) => rest);
 }
 
-export async function runAgent({ text, mediaId, privacyStatus, madeForKids, send, signal }) {
-  const provider = agentProvider();
+export async function runAgent({ text, mediaId, privacyStatus, madeForKids, provider: requested, send, signal }) {
+  const provider = agentProvider(requested);
   if (provider === 'claude' && !cfg.ANTHROPIC_API_KEY) {
     throw new Error('Add your Anthropic API key in Settings (an organisation admin can do this), or switch the assistant to Grok.');
   }
@@ -455,8 +464,8 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, send
 
   for (let step = 0; step < 5; step += 1) {
     if (signal?.aborted) throw new Error('Stopped.');
-    send('status', { text: step === 0 ? `${agentName()} is thinking…` : `${agentName()} is continuing…` });
-    const messages = [{ role: 'system', content: systemPrompt() }, ...history.model];
+    send('status', { text: step === 0 ? `${agentName(provider)} is thinking…` : `${agentName(provider)} is continuing…` });
+    const messages = [{ role: 'system', content: systemPrompt(provider) }, ...history.model];
     const message = provider === 'claude' ? await claudeChat({ messages, tools: TOOLS }) : await grokChat({ messages: forGrok(messages), tools: TOOLS });
     history.model.push(assistantMessage(message));
     if (message.content) {

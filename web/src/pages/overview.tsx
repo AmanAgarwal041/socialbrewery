@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { agentLabel, postNetwork, safeImage, safeLink, timeAgo, type Post } from '@/lib/api'
+import { useAssistant } from '@/lib/assistant'
+import { AssistantTabs } from '@/components/assistant-tabs'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, networkState } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -40,14 +42,15 @@ function QuickBrew() {
   const { health } = useAppState()
   const navigate = useNavigate()
   const [text, setText] = useState('')
+  const assistant = useAssistant(health)
   return (
     <Card className="bg-palette relative overflow-hidden border-0 shadow-md">
       <CardContent className="relative p-6 md:p-8">
         <div className="flex items-center gap-2 text-sm font-medium text-ink/80">
-          <Sparkles className="size-4" /> Brew with {agentLabel(health)}
+          <Sparkles className="size-4" /> Brew with {assistant.label}
         </div>
         <h2 className="mt-2 max-w-xl text-2xl font-semibold tracking-tight text-ink md:text-3xl">
-          Tell {agentLabel(health)} what to make. It writes, generates, and posts.
+          Tell {assistant.label} what to make. It writes, generates, and posts.
         </h2>
         <form
           className="mt-5 flex max-w-2xl items-center gap-2 rounded-2xl bg-white/80 p-1.5 shadow-sm backdrop-blur focus-within:ring-4 focus-within:ring-white/60"
@@ -59,14 +62,18 @@ function QuickBrew() {
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="e.g. An 8s Short of steam rising from coffee, posted unlisted to YouTube"
+            placeholder={`e.g. Ask ${assistant.label} for an 8s Short of steam rising from coffee, posted unlisted to YouTube`}
             className="min-w-0 flex-1 bg-transparent px-3 text-sm text-ink outline-none placeholder:text-ink/50"
             aria-label="Describe what to brew"
           />
-          <Button type="submit" size="icon" className="shrink-0 rounded-xl bg-ink text-white hover:bg-ink/85" aria-label="Open in Brew">
+          <Button type="submit" size="icon" className="shrink-0 rounded-xl bg-ink text-white hover:bg-ink/85" aria-label={`Open in Brew with ${assistant.label}`}>
             <ArrowUp />
           </Button>
         </form>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <AssistantTabs value={assistant.id} onChange={assistant.set} health={health} tone="onBrand" />
+          {health && !assistant.ready && <span className="text-xs text-ink/70">Add your {assistant.keyName} API key in Settings to use {assistant.label}.</span>}
+        </div>
       </CardContent>
     </Card>
   )
