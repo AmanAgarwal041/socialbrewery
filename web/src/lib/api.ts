@@ -1,15 +1,15 @@
+import { getToken } from '@clerk/react'
+
 export type NetworkId = 'youtube' | 'linkedin' | 'instagram' | 'x' | 'hashnode' | 'slack' | 'reddit'
 
 export type Role = 'owner' | 'admin' | 'member'
 export type User = { id: string; email: string; name: string; picture: string }
+// `id` is Socialbrewery's organisation; people, roles, and invites are managed in Clerk.
 export type OrgSummary = { id: string; name: string; role: Role }
-export type Providers = Record<'google' | 'github', { enabled: boolean; redirectUri: string }>
+export type ClerkConfig = { publishableKey: string; configured: boolean }
 export type Session =
-  | { authenticated: false; providers: Providers }
-  | { authenticated: true; user: User; org: OrgSummary | null; orgs: OrgSummary[]; providers: Providers }
-export type Member = User & { role: Role; joinedAt: string }
-export type Invite = { id: string; email: string; role: Role; createdAt: string; expiresAt: string }
-export type OrgDetails = { org: { id: string; name: string }; role: Role; members: Member[]; invites: Invite[] }
+  | { authenticated: false; clerk: ClerkConfig }
+  | { authenticated: true; org: OrgSummary | null; clerk: ClerkConfig }
 
 export type Health = {
   ok: boolean
@@ -192,8 +192,29 @@ export type Settings = { managed: SettingField[]; redirectUri: string }
 
 export const SIGNED_OUT_EVENT = 'socialbrewery:signed-out'
 
+// The current Clerk session token, for this app's own endpoints. Clerk refreshes it (and the
+// __session cookie) as it nears its one-minute expiry.
+export async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getToken().catch(() => null)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function authedFetch(url: string, options?: RequestInit): Promise<Response> {
+  const headers = new Headers(options?.headers)
+  if (url.startsWith('/') && !headers.has('Authorization')) {
+    for (const [key, value] of Object.entries(await authHeaders())) headers.set(key, value)
+  }
+  return fetch(url, { ...options, headers })
+}
+
+// Full-page navigations (connect links) carry the __session cookie instead of a header, so refresh it first.
+export async function navigateSignedIn(url: string) {
+  await getToken().catch(() => null)
+  window.location.assign(url)
+}
+
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, options)
+  const res = await authedFetch(url, options)
   const text = await res.text().catch(() => '')
   let data: unknown = {}
   try {
@@ -230,7 +251,7 @@ export function postNetwork(post: Post): NetworkId {
 }
 
 export async function uploadMedia(file: File): Promise<{ id: string; name: string }> {
-  const res = await fetch('/api/media', {
+  const res = await authedFetch('/api/media', {
     method: 'POST',
     headers: {
       'Content-Type': file.type || 'application/octet-stream',

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { clerkEnv, sessionToken } from './clerk-helper.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -34,7 +35,7 @@ async function waitFor(fn, timeout, label) {
   throw new Error(`Timed out waiting for ${label}. ${last}`);
 }
 
-test('sessions, organisation roles, and the connector scope every request', { timeout: 25000 }, async () => {
+test('Clerk sessions, organisation roles, and the connector scope every request', { timeout: 25000 }, async () => {
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'socialbrewery-'));
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -44,14 +45,11 @@ test('sessions, organisation roles, and the connector scope every request', { ti
   const accounts = await import('../src/accounts.js');
   const { ensureData } = await import('../src/store.js');
   await ensureData();
-  const owner = await accounts.upsertUser({ provider: 'github', subject: '1', email: 'ada@example.com', name: 'Ada' });
-  const member = await accounts.upsertUser({ provider: 'github', subject: '2', email: 'grace@example.com', name: 'Grace' });
-  const org = await accounts.createOrg({ name: 'Brewery', ownerId: owner.id, config: { XAI_API_KEY: 'xai-secret-value', INSTAGRAM_APP_SECRET: 'ig-app-secret' } });
-  const other = await accounts.createOrg({ name: 'Other', ownerId: member.id });
-  const { token: invite } = await accounts.createInvite({ orgId: org.id, email: 'grace@example.com', role: 'member', invitedBy: owner.id, actorRole: 'owner' });
-  await accounts.acceptInvites(member, invite);
-  const ownerCookie = `sb_session=${(await accounts.createSession(owner.id, org.id)).token}`;
-  const memberCookie = `sb_session=${(await accounts.createSession(member.id, org.id)).token}`;
+  const org = await accounts.createOrg({ name: 'Brewery', clerkId: 'org_brew', config: { XAI_API_KEY: 'xai-secret-value', INSTAGRAM_APP_SECRET: 'ig-app-secret' } });
+  const other = await accounts.createOrg({ name: 'Other', clerkId: 'org_other' });
+  const adminToken = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: base });
+  const memberToken = sessionToken({ sub: 'user_grace', o: { id: 'org_brew', rol: 'member' }, azp: base });
+  const noOrgToken = sessionToken({ sub: 'user_new', azp: base });
   const connectorToken = (await accounts.loadOrgConfig(org.id)).CONNECTOR_TOKEN;
   const { instagramVerifyToken } = await import('../src/instagram-webhooks.js');
   const { createHmac } = await import('node:crypto');
@@ -60,7 +58,7 @@ test('sessions, organisation roles, and the connector scope every request', { ti
   let logs = '';
   const proc = spawn(process.execPath, ['src/server.js'], {
     cwd: root,
-    env: { ...process.env, SOCIALBREWERY_HOME: temp },
+    env: { ...process.env, ...clerkEnv, CLERK_SECRET_KEY: '', SOCIALBREWERY_HOME: temp },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -71,7 +69,7 @@ test('sessions, organisation roles, and the connector scope every request', { ti
     logs += chunk;
   });
 
-  const as = (cookie, init = {}) => ({ ...init, headers: { Origin: base, 'Content-Type': 'application/json', ...(init.headers || {}), Cookie: cookie } });
+  const as = (token, init = {}) => ({ ...init, headers: { Origin: base, 'Content-Type': 'application/json', ...(init.headers || {}), Authorization: `Bearer ${token}` } });
 
   try {
     const health = await waitFor(async () => {
@@ -83,64 +81,87 @@ test('sessions, organisation roles, and the connector scope every request', { ti
 
     const anon = await fetch(`${base}/api/session`).then((res) => res.json());
     assert.equal(anon.authenticated, false);
-    assert.equal(anon.providers.github.enabled, false);
+    assert.equal(anon.clerk.publishableKey, clerkEnv.CLERK_PUBLISHABLE_KEY);
+    assert.equal(anon.clerk.configured, true);
     assert.equal((await fetch(`${base}/api/posts`)).status, 401);
     assert.equal((await fetch(`${base}/api/settings`)).status, 401);
+    assert.equal((await fetch(`${base}/api/posts`, as('garbage'))).status, 401);
+    assert.equal((await fetch(`${base}/api/posts`, as(sessionToken({ o: { id: 'org_brew', rol: 'admin' }, exp: 1 })))).status, 401);
 
-    const session = await fetch(`${base}/api/session`, as(ownerCookie)).then((res) => res.json());
+    const session = await fetch(`${base}/api/session`, as(adminToken)).then((res) => res.json());
     assert.equal(session.authenticated, true);
-    assert.equal(session.org.id, org.id);
-    assert.equal(session.orgs.length, 1);
+    assert.deepEqual(session.org, { id: org.id, name: 'Brewery', role: 'admin' });
+    const noOrg = await fetch(`${base}/api/session`, as(noOrgToken)).then((res) => res.json());
+    assert.equal(noOrg.authenticated, true);
+    assert.equal(noOrg.org, null);
+    assert.equal((await fetch(`${base}/api/posts`, as(noOrgToken))).status, 409);
 
-    const signedIn = await fetch(`${base}/api/health`, as(ownerCookie)).then((res) => res.json());
+    // The __session cookie Clerk sets works for navigations, like the Bearer header does for fetches.
+    const byCookie = await fetch(`${base}/api/session`, { headers: { Cookie: `__session=${adminToken}` } }).then((res) => res.json());
+    assert.equal(byCookie.org.id, org.id);
+
+    const signedIn = await fetch(`${base}/api/health`, as(adminToken)).then((res) => res.json());
     assert.equal(signedIn.xai, true);
 
-    const settings = await fetch(`${base}/api/settings`, as(ownerCookie)).then((res) => res.json());
+    const settings = await fetch(`${base}/api/settings`, as(adminToken)).then((res) => res.json());
     const xai = settings.managed.find((field) => field.key === 'XAI_API_KEY');
     assert.equal(xai.value, '');
     assert.equal(xai.set, true);
     assert.equal(JSON.stringify(settings).includes('xai-secret-value'), false);
 
-    const crossSite = await fetch(`${base}/api/settings`, as(ownerCookie, {
+    const crossSite = await fetch(`${base}/api/settings`, as(adminToken, {
       method: 'POST',
       headers: { Origin: 'https://evil.example' },
       body: JSON.stringify({ values: { XAI_MODEL: 'evil' } }),
     }));
     assert.equal(crossSite.status, 403);
 
-    const saved = await fetch(`${base}/api/settings`, as(ownerCookie, {
+    const saved = await fetch(`${base}/api/settings`, as(adminToken, {
       method: 'POST',
       body: JSON.stringify({ values: { XAI_MODEL: 'grok-org-test' } }),
     }));
     assert.equal(saved.status, 200);
-    const after = await fetch(`${base}/api/settings`, as(ownerCookie)).then((res) => res.json());
+    const after = await fetch(`${base}/api/settings`, as(adminToken)).then((res) => res.json());
     assert.equal(after.managed.find((field) => field.key === 'XAI_MODEL').value, 'grok-org-test');
     assert.equal(after.managed.find((field) => field.key === 'XAI_API_KEY').set, true);
     const config = await fs.readFile(path.join(temp, 'data', 'orgs', org.id, 'config.json'), 'utf8');
     assert.equal(config.includes('grok-org-test'), false);
 
-    assert.equal((await fetch(`${base}/api/settings`, as(memberCookie))).status, 403);
-    const memberSave = await fetch(`${base}/api/settings`, as(memberCookie, { method: 'POST', body: '{"values":{}}' }));
+    assert.equal((await fetch(`${base}/api/settings`, as(memberToken))).status, 403);
+    const memberSave = await fetch(`${base}/api/settings`, as(memberToken, { method: 'POST', body: '{"values":{}}' }));
     assert.equal(memberSave.status, 403);
-    const memberConnect = await fetch(`${base}/api/youtube/connect`, { ...as(memberCookie), redirect: 'manual' });
+    const memberConnect = await fetch(`${base}/api/youtube/connect`, { ...as(memberToken), redirect: 'manual' });
     assert.equal(memberConnect.status, 302);
     assert.match(decodeURIComponent(memberConnect.headers.get('location')), /owner or admin/);
-    assert.equal((await fetch(`${base}/api/posts`, as(memberCookie))).status, 200);
-    const memberConnectors = await fetch(`${base}/api/connectors`, as(memberCookie)).then((res) => res.json());
+    assert.equal((await fetch(`${base}/api/posts`, as(memberToken))).status, 200);
+    const memberConnectors = await fetch(`${base}/api/connectors`, as(memberToken)).then((res) => res.json());
     assert.equal(memberConnectors.grok.mcpUrl, '');
 
-    const switched = await fetch(`${base}/api/session/org`, as(ownerCookie, { method: 'POST', body: JSON.stringify({ orgId: other.id }) }));
-    assert.equal(switched.status, 403);
+    // A Clerk organisation seen for the first time gets its own empty Socialbrewery organisation.
+    const fresh = sessionToken({ sub: 'user_new', o: { id: 'org_fresh', rol: 'admin' }, azp: base });
+    const freshSession = await fetch(`${base}/api/session`, as(fresh)).then((res) => res.json());
+    assert.match(freshSession.org.id, /^[a-f0-9]{24}$/);
+    assert.notEqual(freshSession.org.id, org.id);
+    const freshSettings = await fetch(`${base}/api/settings`, as(fresh)).then((res) => res.json());
+    assert.equal(freshSettings.managed.find((field) => field.key === 'XAI_API_KEY').set, false);
 
-    const orgInfo = await fetch(`${base}/api/org`, as(ownerCookie)).then((res) => res.json());
-    assert.equal(orgInfo.members.length, 2);
-    const created = await fetch(`${base}/api/org/invites`, as(ownerCookie, {
-      method: 'POST',
-      body: JSON.stringify({ email: 'new@example.com', role: 'admin' }),
-    })).then((res) => res.json());
-    assert.match(created.link, new RegExp(`^${base}/invite/`));
-    const lookup = await fetch(`${base}/api/invites/lookup?token=${created.link.split('/').pop()}`).then((res) => res.json());
-    assert.equal(lookup.invite.orgName, 'Brewery');
+    const orgInfo = await fetch(`${base}/api/org`, as(adminToken)).then((res) => res.json());
+    assert.deepEqual(orgInfo, { org: { id: org.id, name: 'Brewery' }, role: 'admin' });
+    assert.equal((await fetch(`${base}/api/org/invites`, as(adminToken, { method: 'POST', body: '{}' }))).status, 404);
+
+    // Connecting a network: the callback can arrive after the Clerk token expired, so the connect step
+    // leaves a signed ticket for that organisation. Without it, a callback is not signed in.
+    const connect = await fetch(`${base}/api/youtube/connect`, { headers: { Cookie: `__session=${adminToken}` }, redirect: 'manual' });
+    assert.equal(connect.status, 302);
+    const ticket = connect.headers.get('set-cookie');
+    assert.match(ticket, /^sb_connect=[a-f0-9]{24}\.admin\.\d+\.[\w-]+; Path=\/api; HttpOnly; SameSite=Lax; Max-Age=1200/);
+    const callback = (cookie) => fetch(`${base}/api/youtube/callback?code=c&state=s`, { headers: cookie ? { Cookie: cookie } : {}, redirect: 'manual' });
+    assert.equal((await callback('')).status, 401);
+    assert.equal((await callback(`sb_connect=${ticket.split(';')[0].split('=')[1].replace('admin', 'owner')}`)).status, 401);
+    const landed = await callback(ticket.split(';')[0]);
+    assert.equal(landed.status, 302);
+    assert.match(decodeURIComponent(landed.headers.get('location')), /notice=/);
+    assert.match(landed.headers.get('set-cookie'), /sb_connect=; .*Max-Age=0/);
 
     const rpc = (token) => fetch(`${base}/mcp`, {
       method: 'POST',
@@ -151,7 +172,7 @@ test('sessions, organisation roles, and the connector scope every request', { ti
     const tools = await rpc(connectorToken).then((res) => res.json());
     assert.ok(tools.result.tools.length > 5);
 
-    const media = await fetch(`${base}/api/media`, as(ownerCookie, {
+    const media = await fetch(`${base}/api/media`, as(adminToken, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain', 'X-Filename': 'notes.txt' },
       body: 'hello',
@@ -178,14 +199,14 @@ test('sessions, organisation roles, and the connector scope every request', { ti
     assert.equal((await deliver(event, 'not-the-secret')).status, 401);
     assert.equal((await deliver(event, 'ig-app-secret')).status, 200);
     assert.equal((await deliver(event, 'ig-app-secret')).status, 200);
-    const events = await fetch(`${base}/api/instagram/events`, as(memberCookie)).then((res) => res.json());
+    const events = await fetch(`${base}/api/instagram/events`, as(memberToken)).then((res) => res.json());
     assert.equal(events.events.length, 1);
     assert.equal(events.events[0].text, 'Love this');
     assert.equal(events.events[0].from, 'fan');
-    const ownerView = await fetch(`${base}/api/connectors`, as(ownerCookie)).then((res) => res.json());
+    const ownerView = await fetch(`${base}/api/connectors`, as(adminToken)).then((res) => res.json());
     assert.equal(ownerView.instagram.webhook.verifyToken, verifyToken);
     assert.equal(memberConnectors.instagram.webhook, null);
-    const memberSubscribe = await fetch(`${base}/api/instagram/webhooks/subscribe`, as(memberCookie, { method: 'POST', body: '{}' }));
+    const memberSubscribe = await fetch(`${base}/api/instagram/webhooks/subscribe`, as(memberToken, { method: 'POST', body: '{}' }));
     assert.equal(memberSubscribe.status, 403);
 
     const deepLink = await fetch(`${base}/connectors/youtube/analysis`);
@@ -200,11 +221,8 @@ test('sessions, organisation roles, and the connector scope every request', { ti
       assert.match(js.headers.get('cache-control'), /immutable/);
     }
     assert.notEqual((await fetch(`${base}/assets/..%2f..%2f.env`)).status, 200);
-    assert.equal((await fetch(`${base}/api/nope`, as(ownerCookie))).status, 404);
+    assert.equal((await fetch(`${base}/api/nope`, as(adminToken))).status, 404);
 
-    const logout = await fetch(`${base}/auth/logout`, as(ownerCookie, { method: 'POST' }));
-    assert.match(logout.headers.get('set-cookie'), /Max-Age=0/);
-    assert.equal((await fetch(`${base}/api/posts`, as(ownerCookie))).status, 401);
     assert.equal(logs.includes('xai-secret-value'), false);
   } finally {
     try {

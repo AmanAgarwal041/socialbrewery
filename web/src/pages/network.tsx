@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { api, postJson, postNetwork, safeImage, timeAgo, type InstagramEvent, type NetworkId } from '@/lib/api'
+import { api, navigateSignedIn, postJson, postNetwork, safeImage, timeAgo, type InstagramEvent, type NetworkId } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { SLOT_CLASSES, networkById, networkState, type NetworkMeta } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -296,7 +296,13 @@ function NetworkConnection({ network }: { network: NetworkMeta }) {
               </Button>
             ) : (
               <Button asChild>
-                <a href={`/api/${network.id}/connect`}>
+                <a
+                  href={`/api/${network.id}/connect`}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    navigateSignedIn(`/api/${network.id}/connect`)
+                  }}
+                >
                   <Plug /> {state.connected ? 'Reconnect' : `Connect ${network.name}`}
                 </a>
               </Button>

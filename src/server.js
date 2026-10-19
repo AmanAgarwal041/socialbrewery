@@ -6,34 +6,17 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { appUrl, loadEnv, normalizeOrgSettings, normalizeSystem, orgSettingsView, secureCookies } from './env.js';
 import {
-  ROLES,
-  acceptInvites,
-  createInvite,
-  createOrg,
-  deleteSession,
   findOrgByConnectorToken,
   getOrg,
-  getSession,
-  getUser,
-  inviteByToken,
-  listInvites,
-  listMembers,
   loadOrgConfig,
-  membership,
-  membershipsFor,
-  publicUser,
-  removeMember,
-  renameOrg,
-  revokeInvite,
+  orgForClerk,
   roleAtLeast,
   rotateConnectorToken,
   saveOrgConfig,
-  setMemberRole,
-  setSessionOrg,
 } from './accounts.js';
-import { authProviders, beginSignIn, finishSignIn } from './auth.js';
-import { cfg, currentContext, isOrgId, runWithOrg } from './context.js';
-import { verifySignature } from './secure.js';
+import { clerkConfigured, clerkPublishableKey, verifySessionToken } from './clerk.js';
+import { cfg, currentContext, runWithOrg } from './context.js';
+import { sign, verifySignature } from './secure.js';
 import { runAgent } from './agent.js';
 import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
@@ -250,21 +233,24 @@ async function health() {
   };
 }
 
-const SESSION_COOKIE = 'sb_session';
+const CONNECT_COOKIE = 'sb_connect';
+const CONNECT_MINUTES = 20;
+const NETWORK_CALLBACK = /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/callback$/;
+const NETWORK_CONNECT = /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/connect$/;
 
 function cookies(req) {
   const out = {};
   for (const part of String(req.headers.cookie || '').split(';')) {
     const eq = part.indexOf('=');
-    if (eq > 0) out[part.slice(0, eq).trim()] = decodeURIComponent(part.slice(eq + 1).trim());
+    if (eq > 0) {
+      try {
+        out[part.slice(0, eq).trim()] = decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        // Skip a cookie that is not valid percent-encoding.
+      }
+    }
   }
   return out;
-}
-
-function sessionCookie(token, maxAge) {
-  const parts = [`${SESSION_COOKIE}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
-  if (secureCookies()) parts.push('Secure');
-  return parts.join('; ');
 }
 
 // Browsers send Origin on state-changing requests; anything from another site is refused.
@@ -278,20 +264,44 @@ function requireRole(ctx, needed) {
   if (!roleAtLeast(ctx.role, needed)) throw fail(`Only an organisation ${needed} can do that.`, 403);
 }
 
-async function sessionInfo(req) {
-  const token = cookies(req)[SESSION_COOKIE] || '';
-  const session = await getSession(token);
-  if (!session) return { token: '', session: null, user: null };
-  const user = await getUser(session.userId);
-  if (!user) return { token: '', session: null, user: null };
-  return { token, session, user };
+function bearer(req) {
+  const match = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
+  return match ? match[1] : '';
 }
 
-async function orgContextFor(user, orgId) {
-  if (!isOrgId(orgId)) return null;
-  const [org, member] = await Promise.all([getOrg(orgId), membership(orgId, user.id)]);
-  if (!org || !member) return null;
-  return { org: { id: org.id, name: org.name }, config: await loadOrgConfig(org.id), user: publicUser(user), role: member.role };
+// The Clerk session behind a request: the Authorization header the dashboard sends with fetches, or the
+// __session cookie Clerk keeps fresh for navigations (connect links, video playback). Null when neither is there.
+async function clerkSession(req) {
+  const token = bearer(req) || cookies(req).__session || '';
+  if (!token) return null;
+  const host = req.headers.host;
+  return verifySessionToken(token, { requestOrigins: host ? [`http://${host}`, `https://${host}`] : [] });
+}
+
+async function orgContext(org, role, userId) {
+  return { org: { id: org.id, name: org.name }, config: await loadOrgConfig(org.id), user: userId ? { id: userId } : null, role };
+}
+
+// A network's consent screen can take longer than a Clerk session token lives (about a minute), so the
+// connect step leaves a signed, 20-minute ticket for its callback, naming the organisation and role it
+// started in. The callback still has to match that organisation's single-use OAuth state.
+function connectTicketCookie(ctx) {
+  const exp = Math.floor(Date.now() / 1000) + CONNECT_MINUTES * 60;
+  const body = `${ctx.org.id}.${ctx.role}.${exp}`;
+  return cookieHeader(CONNECT_COOKIE, `${body}.${sign(`connect:${body}`)}`, CONNECT_MINUTES * 60);
+}
+
+function cookieHeader(name, value, maxAge) {
+  const parts = [`${name}=${value}`, 'Path=/api', 'HttpOnly', 'SameSite=Lax', `Max-Age=${maxAge}`];
+  if (secureCookies()) parts.push('Secure');
+  return parts.join('; ');
+}
+
+async function connectTicketContext(req) {
+  const [orgId, role, exp, sig] = String(cookies(req)[CONNECT_COOKIE] || '').split('.');
+  if (!sig || !(Number(exp) > Date.now() / 1000) || !verifySignature(`connect:${orgId}.${role}.${exp}`, sig)) return null;
+  const org = await getOrg(orgId);
+  return org ? orgContext(org, role, null) : null;
 }
 
 const busyOrgs = new Set();
@@ -396,16 +406,20 @@ export function mediaUploadInfo(req) {
   return { name, mime: kind.mime };
 }
 
-export async function signedInContext(req, known) {
+// The organisation a request acts in: the active organisation of its Clerk session, linked to a
+// Socialbrewery organisation on first use. `pathname` lets network callbacks fall back to their ticket.
+export async function signedInContext(req, { pathname = '' } = {}) {
   const unsafe = req.method !== 'GET' && req.method !== 'HEAD';
   if (unsafe && !sameOrigin(req)) throw fail('Cross-site request refused.', 403);
-  const { session, user } = known || (await sessionInfo(req));
-  if (!user) throw fail('Sign in to continue.', 401);
-  let orgId = session.orgId;
-  if (!isOrgId(orgId)) orgId = (await membershipsFor(user.id))[0]?.id || '';
-  const ctx = await orgContextFor(user, orgId);
-  if (!ctx) throw fail('Choose an organisation first.', 409);
-  return ctx;
+  if (req.method === 'GET' && NETWORK_CALLBACK.test(pathname)) {
+    const ticket = await connectTicketContext(req);
+    if (ticket) return ticket;
+  }
+  const session = await clerkSession(req);
+  if (!session) throw fail('Sign in to continue.', 401);
+  if (!session.orgId) throw fail('Choose an organisation first.', 409);
+  const org = await orgForClerk({ clerkOrgId: session.orgId, clerkUserId: session.userId, role: session.role });
+  return orgContext(org, session.role, session.userId);
 }
 
 export async function publicMediaContext(orgId, mediaId, searchParams) {
@@ -458,7 +472,7 @@ async function route(req, res) {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const { pathname } = url;
 
-  const isApp = !/^\/(api|auth|public|webhooks)\//.test(pathname) && pathname !== '/mcp';
+  const isApp = !/^\/(api|public|webhooks)\//.test(pathname) && pathname !== '/mcp';
   if (req.method === 'GET' && isApp) {
     const file = pathname === '/' ? null : staticFile(pathname);
     const exists = file ? await fs.stat(file).then((s) => s.isFile(), () => false) : false;
@@ -492,68 +506,20 @@ async function route(req, res) {
   }
 
   const unsafe = req.method !== 'GET' && req.method !== 'HEAD';
-  if (unsafe && (pathname.startsWith('/api/') || pathname.startsWith('/auth/')) && !sameOrigin(req)) {
+  if (unsafe && pathname.startsWith('/api/') && !sameOrigin(req)) {
     throw fail('Cross-site request refused.', 403);
   }
 
-  const signIn = pathname.match(/^\/auth\/(google|github)$/);
-  if (req.method === 'GET' && signIn) {
-    try {
-      redirect(res, await beginSignIn(signIn[1], { invite: url.searchParams.get('invite') || '' }));
-    } catch (err) {
-      redirect(res, `/login?error=${encodeURIComponent(err.message)}`);
-    }
-    return;
-  }
-
-  const signInCallback = pathname.match(/^\/auth\/(google|github)\/callback$/);
-  if (req.method === 'GET' && signInCallback) {
-    const error = url.searchParams.get('error');
-    if (error) {
-      redirect(res, `/login?error=${encodeURIComponent(error === 'access_denied' ? 'Sign-in was cancelled.' : `Sign-in failed: ${error}`)}`);
-      return;
-    }
-    try {
-      const result = await finishSignIn(signInCallback[1], url.searchParams.get('code') || '', url.searchParams.get('state') || '');
-      res.setHeader('Set-Cookie', sessionCookie(result.session.token, result.session.maxAge));
-      redirect(res, result.notice ? notice(result.notice) : '/');
-    } catch (err) {
-      console.error(`Sign-in failed: ${err.message}`);
-      redirect(res, `/login?error=${encodeURIComponent(err.message)}`);
-    }
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/auth/logout') {
-    await deleteSession(cookies(req)[SESSION_COOKIE]);
-    res.setHeader('Set-Cookie', sessionCookie('', 0));
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-
-  if (req.method === 'GET' && pathname === '/api/invites/lookup') {
-    const invite = await inviteByToken(url.searchParams.get('token') || '');
-    if (!invite) throw fail('This invite is invalid or has expired.', 404);
-    sendJson(res, 200, { invite: { orgName: invite.orgName, email: invite.email, role: invite.role } });
-    return;
-  }
-
-  const { token: sessionToken, session, user } = await sessionInfo(req);
-
+  // The dashboard reads this before Clerk loads: the publishable key, and once signed in, the organisation.
   if (req.method === 'GET' && pathname === '/api/session') {
-    if (!user) {
-      sendJson(res, 200, { authenticated: false, providers: authProviders() });
+    const clerk = { publishableKey: clerkPublishableKey(), configured: clerkConfigured() };
+    const ctx = await signedInContext(req).catch((err) => (err.status === 409 ? 'no-org' : null));
+    if (!ctx) {
+      sendJson(res, 200, { authenticated: false, clerk });
       return;
     }
-    const orgs = await membershipsFor(user.id);
-    const active = orgs.find((o) => o.id === session.orgId) || orgs[0] || null;
-    if (active && active.id !== session.orgId) await setSessionOrg(sessionToken, active.id);
-    sendJson(res, 200, { authenticated: true, user: publicUser(user), org: active, orgs, roles: ROLES, providers: authProviders() });
-    return;
-  }
-
-  if (req.method === 'GET' && pathname === '/api/health' && !user) {
-    sendJson(res, 200, { ok: true, bootId: bootId(), authenticated: false });
+    const org = ctx === 'no-org' ? null : { id: ctx.org.id, name: ctx.org.name, role: ctx.role };
+    sendJson(res, 200, { authenticated: true, org, clerk });
     return;
   }
 
@@ -561,35 +527,18 @@ async function route(req, res) {
     sendJson(res, 404, { error: 'Not found.' });
     return;
   }
-  if (!user) throw fail('Sign in to continue.', 401);
 
-  if (req.method === 'POST' && pathname === '/api/session/org') {
-    const body = await readJsonBody(req);
-    if (!(await membership(String(body.orgId || ''), user.id))) throw fail('You are not in that organisation.', 403);
-    await setSessionOrg(sessionToken, body.orgId);
-    sendJson(res, 200, { ok: true });
+  if (req.method === 'GET' && pathname === '/api/health') {
+    const ctx = await signedInContext(req).catch(() => null);
+    if (!ctx) {
+      sendJson(res, 200, { ok: true, bootId: bootId(), authenticated: false });
+      return;
+    }
+    await runWithOrg(ctx, async () => sendJson(res, 200, await health()));
     return;
   }
 
-  if (req.method === 'POST' && pathname === '/api/orgs') {
-    const body = await readJsonBody(req);
-    const org = await createOrg({ name: body.name, ownerId: user.id });
-    await setSessionOrg(sessionToken, org.id);
-    sendJson(res, 201, { org: { id: org.id, name: org.name, role: 'owner' } });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/api/invites/accept') {
-    const body = await readJsonBody(req);
-    const { accepted, tokenError } = await acceptInvites(user, String(body.token || ''));
-    if (tokenError && !accepted.length) throw fail(tokenError, 403);
-    if (!accepted.length) throw fail('This invite is invalid or has expired.', 404);
-    await setSessionOrg(sessionToken, accepted.at(-1));
-    sendJson(res, 200, { ok: true, orgId: accepted.at(-1) });
-    return;
-  }
-
-  const ctx = await signedInContext(req, { session, user });
+  const ctx = await signedInContext(req, { pathname });
   await runWithOrg(ctx, () => orgRoute(req, res, url, ctx));
 }
 
@@ -597,7 +546,7 @@ const ADMIN_ROUTES = [
   /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/(connect|callback|disconnect)$/,
   /^\/api\/settings$/,
   /^\/api\/instagram\/webhooks\/subscribe$/,
-  /^\/api\/org\/(invites|members|connector)/,
+  /^\/api\/org\/connector/,
 ];
 
 async function orgRoute(req, res, url, ctx) {
@@ -611,11 +560,8 @@ async function orgRoute(req, res, url, ctx) {
       requireRole(ctx, 'admin');
     }
   }
-
-  if (req.method === 'GET' && pathname === '/api/health') {
-    sendJson(res, 200, await health());
-    return;
-  }
+  if (req.method === 'GET' && NETWORK_CONNECT.test(pathname)) res.setHeader('Set-Cookie', connectTicketCookie(ctx));
+  if (req.method === 'GET' && NETWORK_CALLBACK.test(pathname)) res.setHeader('Set-Cookie', cookieHeader(CONNECT_COOKIE, '', 0));
 
   if (req.method === 'GET' && pathname === '/api/settings') {
     requireRole(ctx, 'admin');
@@ -632,55 +578,9 @@ async function orgRoute(req, res, url, ctx) {
     return;
   }
 
+  // Members, roles, invites, and the organisation's name are managed in Clerk.
   if (req.method === 'GET' && pathname === '/api/org') {
-    const canManage = roleAtLeast(ctx.role, 'admin');
-    sendJson(res, 200, {
-      org: ctx.org,
-      role: ctx.role,
-      members: await listMembers(ctx.org.id),
-      invites: canManage ? await listInvites(ctx.org.id) : [],
-    });
-    return;
-  }
-
-  if (req.method === 'PATCH' && pathname === '/api/org') {
-    requireRole(ctx, 'admin');
-    const body = await readJsonBody(req);
-    sendJson(res, 200, { org: await renameOrg(ctx.org.id, body.name) });
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/api/org/invites') {
-    const body = await readJsonBody(req);
-    const { invite, token } = await createInvite({
-      orgId: ctx.org.id,
-      email: body.email,
-      role: String(body.role || 'member'),
-      invitedBy: ctx.user.id,
-      actorRole: ctx.role,
-    });
-    sendJson(res, 201, { invite, link: `${appUrl()}/invite/${token}` });
-    return;
-  }
-
-  const inviteMatch = pathname.match(/^\/api\/org\/invites\/([a-f0-9]{24})$/);
-  if (req.method === 'DELETE' && inviteMatch) {
-    await revokeInvite(ctx.org.id, inviteMatch[1]);
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-
-  const memberMatch = pathname.match(/^\/api\/org\/members\/([a-f0-9]{24})$/);
-  if (req.method === 'PATCH' && memberMatch) {
-    const body = await readJsonBody(req);
-    await setMemberRole({ orgId: ctx.org.id, actorRole: ctx.role, userId: memberMatch[1], role: String(body.role || '') });
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-
-  if (req.method === 'DELETE' && memberMatch) {
-    await removeMember({ orgId: ctx.org.id, actorRole: ctx.role, userId: memberMatch[1] });
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { org: ctx.org, role: ctx.role });
     return;
   }
 
@@ -1324,9 +1224,8 @@ async function main() {
     process.exit(1);
   }
   for (const warning of warnings) console.warn(warning);
-  const providers = authProviders();
-  if (!Object.values(providers).some((p) => p.enabled)) {
-    console.warn('No sign-in provider is set up. Set GOOGLE_AUTH_CLIENT_ID/SECRET or GITHUB_AUTH_CLIENT_ID/SECRET in .env or the environment, then restart.');
+  if (!clerkConfigured()) {
+    console.warn('Sign-in is not set up. Set CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY in .env or the environment, then restart.');
   }
   const server = http.createServer(handleRequest);
   await listen(server, host, port);

@@ -34,7 +34,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { api, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
+import { api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type NetworkId } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, type Slot } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -409,7 +409,7 @@ export function BrewPage() {
         mediaId = media.id
         mediaName = media.name
       }
-      const res = await fetch('/api/agent/message', {
+      const res = await authedFetch('/api/agent/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: message, mediaId, privacyStatus: privacy, madeForKids: kids }),

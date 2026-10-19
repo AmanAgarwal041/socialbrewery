@@ -4,30 +4,24 @@ import { randomBytes } from 'node:crypto';
 import { dataDir } from './paths.js';
 import { isOrgId, orgDataDir, runWithOrg } from './context.js';
 import { legacyOrgSettings, orgDefaults, stripLegacyOrgSettings } from './env.js';
+import { clerkOrganization, clerkUser, verifiedEmails } from './clerk.js';
 import { decryptJson, encryptJson, isEncrypted, randomToken, sha256 } from './secure.js';
 import { NETWORKS, enqueue, readJson, systemDir, writeJson, writeNetworkToken } from './store.js';
 import { onWorkers } from './storage.js';
 
-const usersFile = path.join(systemDir, 'users.json');
+// People, memberships, roles, and invites live in Clerk. Socialbrewery keeps one record per organisation
+// here, keyed by its own id (data paths and encryption are bound to it), with the Clerk organisation it
+// belongs to in clerkId.
 const orgsFile = path.join(systemDir, 'orgs.json');
-const membersFile = path.join(systemDir, 'members.json');
-const invitesFile = path.join(systemDir, 'invites.json');
-const sessionsFile = path.join(systemDir, 'sessions.json');
-const authStatesFile = path.join(systemDir, 'auth-states.json');
+// From before Clerk: read only, to hand an owner's existing organisation to their Clerk organisation.
+const legacyUsersFile = path.join(systemDir, 'users.json');
+const legacyMembersFile = path.join(systemDir, 'members.json');
 
 export const ROLES = ['owner', 'admin', 'member'];
 const RANK = { member: 1, admin: 2, owner: 3 };
-const SESSION_DAYS = 30;
-const INVITE_DAYS = 14;
 
 export function roleAtLeast(role, needed) {
   return (RANK[role] || 0) >= RANK[needed];
-}
-
-function fail(message, status = 400) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
 }
 
 function newId() {
@@ -45,10 +39,6 @@ function update(file, mutator) {
     await writeJson(file, next);
     return next;
   });
-}
-
-function normalizeEmail(value) {
-  return String(value || '').trim().toLowerCase();
 }
 
 // ---------- organisation settings (encrypted) ----------
@@ -91,238 +81,81 @@ export async function findOrgByConnectorToken(token) {
   return (await list(orgsFile)).find((org) => org.connectorHash && org.connectorHash === hash) || null;
 }
 
-export async function createOrg({ name, ownerId, config = {} }) {
-  const org = { id: newId(), name: String(name || '').trim().slice(0, 80) || 'My organisation', createdAt: new Date().toISOString(), createdBy: ownerId, connectorHash: '' };
+export async function createOrg({ name, clerkId = '', createdBy = '', config = {} }) {
+  const org = {
+    id: newId(),
+    clerkId,
+    name: String(name || '').trim().slice(0, 80) || 'My organisation',
+    createdAt: new Date().toISOString(),
+    createdBy,
+    connectorHash: '',
+  };
   await update(orgsFile, (orgs) => [...orgs, org]);
-  await update(membersFile, (members) => [...members, { orgId: org.id, userId: ownerId, role: 'owner', joinedAt: org.createdAt }]);
   await saveOrgConfig(org.id, { ...config, CONNECTOR_TOKEN: config.CONNECTOR_TOKEN || randomToken(24) });
   return org;
 }
 
-export async function renameOrg(orgId, name) {
-  const clean = String(name || '').trim().slice(0, 80);
-  if (!clean) throw fail('Give the organisation a name.');
-  await update(orgsFile, (orgs) => orgs.map((org) => (org.id === orgId ? { ...org, name: clean } : org)));
-  return getOrg(orgId);
+async function linkOrg(orgId, fields) {
+  let linked = null;
+  await update(orgsFile, (orgs) =>
+    orgs.map((org) => {
+      if (org.id !== orgId) return org;
+      linked = { ...org, ...fields };
+      return linked;
+    }),
+  );
+  return linked;
 }
 
-// ---------- users ----------
-
-export async function getUser(userId) {
-  return (await list(usersFile)).find((user) => user.id === userId) || null;
+// The oldest organisation from before Clerk that this person owned and that no Clerk organisation has
+// claimed yet, matched by verified email.
+async function unclaimedLegacyOrg(emails) {
+  if (!emails.length) return null;
+  const [users, members, orgs] = await Promise.all([list(legacyUsersFile), list(legacyMembersFile), list(orgsFile)]);
+  const userIds = new Set(users.filter((u) => (u.emails || [u.email]).some((e) => emails.includes(String(e || '').toLowerCase()))).map((u) => u.id));
+  if (!userIds.size) return null;
+  const owned = new Set(members.filter((m) => m.role === 'owner' && userIds.has(m.userId)).map((m) => m.orgId));
+  return orgs.find((org) => !org.clerkId && owned.has(org.id)) || null;
 }
 
-// identity: { provider, subject, email, emails: [verified emails], name, picture }
-export async function upsertUser(identity) {
-  const emails = [...new Set([identity.email, ...(identity.emails || [])].map(normalizeEmail).filter(Boolean))];
-  let result;
-  await update(usersFile, (users) => {
-    const now = new Date().toISOString();
-    let user =
-      users.find((u) => u.identities?.some((i) => i.provider === identity.provider && i.subject === identity.subject)) ||
-      users.find((u) => (u.emails || []).some((e) => emails.includes(e)));
-    if (!user) {
-      user = { id: newId(), email: emails[0] || '', emails: [], name: '', picture: '', identities: [], createdAt: now };
-      users.push(user);
-    }
-    if (!user.identities.some((i) => i.provider === identity.provider && i.subject === identity.subject)) {
-      user.identities.push({ provider: identity.provider, subject: identity.subject });
-    }
-    user.emails = [...new Set([...(user.emails || []), ...emails])];
-    user.email = user.email || emails[0] || '';
-    user.name = identity.name || user.name || user.email;
-    user.picture = identity.picture || user.picture || '';
-    user.lastLoginAt = now;
-    result = { ...user };
-    return users;
-  });
-  return result;
-}
-
-export function publicUser(user) {
-  return user ? { id: user.id, email: user.email, name: user.name, picture: user.picture } : null;
-}
-
-// ---------- memberships ----------
-
-export async function membershipsFor(userId) {
-  const [members, orgs] = await Promise.all([list(membersFile), list(orgsFile)]);
-  return members
-    .filter((m) => m.userId === userId)
-    .map((m) => ({ ...m, org: orgs.find((o) => o.id === m.orgId) }))
-    .filter((m) => m.org)
-    .map((m) => ({ id: m.org.id, name: m.org.name, role: m.role }));
-}
-
-export async function membership(orgId, userId) {
-  return (await list(membersFile)).find((m) => m.orgId === orgId && m.userId === userId) || null;
-}
-
-export async function listMembers(orgId) {
-  const [members, users] = await Promise.all([list(membersFile), list(usersFile)]);
-  return members
-    .filter((m) => m.orgId === orgId)
-    .map((m) => ({ ...publicUser(users.find((u) => u.id === m.userId)), role: m.role, joinedAt: m.joinedAt }))
-    .filter((m) => m.id);
-}
-
-async function ownerCount(orgId, members) {
-  return members.filter((m) => m.orgId === orgId && m.role === 'owner').length;
-}
-
-export async function setMemberRole({ orgId, actorRole, userId, role }) {
-  if (!ROLES.includes(role)) throw fail('Role must be owner, admin, or member.');
-  await update(membersFile, async (members) => {
-    const target = members.find((m) => m.orgId === orgId && m.userId === userId);
-    if (!target) throw fail('That person is not in this organisation.', 404);
-    if ((target.role === 'owner' || role === 'owner') && actorRole !== 'owner') throw fail('Only an owner can change owners.', 403);
-    if (target.role === 'owner' && role !== 'owner' && (await ownerCount(orgId, members)) <= 1) {
-      throw fail('An organisation needs at least one owner.');
-    }
-    target.role = role;
-    return members;
-  });
-}
-
-export async function removeMember({ orgId, actorRole, userId }) {
-  await update(membersFile, async (members) => {
-    const target = members.find((m) => m.orgId === orgId && m.userId === userId);
-    if (!target) throw fail('That person is not in this organisation.', 404);
-    if (target.role === 'owner' && actorRole !== 'owner') throw fail('Only an owner can remove an owner.', 403);
-    if (target.role === 'owner' && (await ownerCount(orgId, members)) <= 1) throw fail('An organisation needs at least one owner.');
-    return members.filter((m) => m !== target);
-  });
-  await update(sessionsFile, (sessions) => sessions.map((s) => (s.userId === userId && s.orgId === orgId ? { ...s, orgId: '' } : s)));
-}
-
-// ---------- invites ----------
-
-export async function listInvites(orgId) {
-  const now = Date.now();
-  return (await list(invitesFile))
-    .filter((i) => i.orgId === orgId && Date.parse(i.expiresAt) > now)
-    .map(({ tokenHash, ...invite }) => invite);
-}
-
-export async function createInvite({ orgId, email, role, invitedBy, actorRole }) {
-  const clean = normalizeEmail(email);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) throw fail('Enter a valid email address.');
-  if (!['admin', 'member'].includes(role) && !(role === 'owner' && actorRole === 'owner')) throw fail('Pick admin or member.');
-  const members = await listMembers(orgId);
-  if (members.some((m) => normalizeEmail(m.email) === clean)) throw fail('That person is already a member.');
-  const token = randomToken(24);
-  const invite = {
-    id: newId(),
-    orgId,
-    email: clean,
-    role,
-    tokenHash: sha256(token),
-    invitedBy,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + INVITE_DAYS * 86400000).toISOString(),
-  };
-  await update(invitesFile, (invites) => [...invites.filter((i) => !(i.orgId === orgId && i.email === clean)), invite]);
-  const { tokenHash, ...shown } = invite;
-  return { invite: shown, token };
-}
-
-export async function revokeInvite(orgId, inviteId) {
-  await update(invitesFile, (invites) => invites.filter((i) => !(i.orgId === orgId && i.id === inviteId)));
-}
-
-export async function inviteByToken(token) {
-  if (!token) return null;
-  const hash = sha256(token);
-  const invite = (await list(invitesFile)).find((i) => i.tokenHash === hash && Date.parse(i.expiresAt) > Date.now());
-  if (!invite) return null;
-  const org = await getOrg(invite.orgId);
-  return org ? { id: invite.id, orgId: org.id, orgName: org.name, email: invite.email, role: invite.role } : null;
-}
-
-async function join(orgId, userId, role) {
-  await update(membersFile, (members) => {
-    if (members.some((m) => m.orgId === orgId && m.userId === userId)) return members;
-    return [...members, { orgId, userId, role, joinedAt: new Date().toISOString() }];
-  });
-}
-
-// Joins every pending invite sent to one of the user's verified emails; with a token, that invite must match too.
-export async function acceptInvites(user, token) {
-  const emails = new Set((user.emails || []).map(normalizeEmail));
-  const hash = token ? sha256(token) : '';
-  const now = Date.now();
-  const matched = [];
-  let tokenError = '';
-  await update(invitesFile, (invites) => {
-    const keep = [];
-    for (const invite of invites) {
-      const live = Date.parse(invite.expiresAt) > now;
-      if (live && emails.has(invite.email)) {
-        matched.push(invite);
-        continue;
-      }
-      if (live && hash && invite.tokenHash === hash) {
-        tokenError = `This invite was sent to ${invite.email}. Sign in with an account that uses that email.`;
-      }
-      if (live) keep.push(invite);
-    }
-    return keep;
-  });
-  for (const invite of matched) await join(invite.orgId, user.id, invite.role);
-  return { accepted: matched.map((i) => i.orgId), tokenError };
-}
-
-// ---------- sessions ----------
-
-export async function createSession(userId, orgId) {
-  const token = randomToken(32);
-  const now = Date.now();
-  await update(sessionsFile, (sessions) => [
-    ...sessions.filter((s) => Date.parse(s.expiresAt) > now),
-    { hash: sha256(token), userId, orgId: orgId || '', createdAt: new Date(now).toISOString(), expiresAt: new Date(now + SESSION_DAYS * 86400000).toISOString() },
+async function clerkDetails(clerkOrgId, clerkUserId) {
+  const [org, user] = await Promise.all([
+    clerkOrganization(clerkOrgId).catch((err) => {
+      console.error(`Could not read Clerk organisation ${clerkOrgId}: ${err.message}`);
+      return null;
+    }),
+    clerkUser(clerkUserId).catch((err) => {
+      console.error(`Could not read Clerk user ${clerkUserId}: ${err.message}`);
+      return null;
+    }),
   ]);
-  return { token, maxAge: SESSION_DAYS * 86400 };
+  return { name: org?.name || '', emails: verifiedEmails(user) };
 }
 
-export async function getSession(token) {
-  if (!token) return null;
-  const hash = sha256(token);
-  const session = (await list(sessionsFile)).find((s) => s.hash === hash);
-  if (!session || Date.parse(session.expiresAt) <= Date.now()) return null;
-  return session;
-}
+const linking = new Map();
 
-export async function setSessionOrg(token, orgId) {
-  const hash = sha256(token);
-  await update(sessionsFile, (sessions) => sessions.map((s) => (s.hash === hash ? { ...s, orgId } : s)));
-}
-
-export async function deleteSession(token) {
-  if (!token) return;
-  const hash = sha256(token);
-  await update(sessionsFile, (sessions) => sessions.filter((s) => s.hash !== hash));
-}
-
-// ---------- sign-in state ----------
-
-export async function saveAuthState(record) {
-  const token = randomToken(24);
-  const now = Date.now();
-  await update(authStatesFile, (states) => [
-    ...states.filter((s) => s.exp > now),
-    { ...record, hash: sha256(token), exp: now + 10 * 60 * 1000 },
-  ]);
-  return token;
-}
-
-export async function takeAuthState(token) {
-  const hash = sha256(token || '');
-  let found = null;
-  await update(authStatesFile, (states) => {
-    found = states.find((s) => s.hash === hash && s.exp > Date.now()) || null;
-    return states.filter((s) => s.hash !== hash && s.exp > Date.now());
-  });
-  return found;
+// The Socialbrewery organisation behind a Clerk organisation, created on first use. The first Clerk
+// organisation one of its admins opens takes over that admin's organisation from before Clerk, so keys,
+// connected accounts, and posts carry over; on a fresh server the very first one also takes the
+// single-user files from before organisations existed.
+export async function orgForClerk({ clerkOrgId, clerkUserId, role }) {
+  const known = (await list(orgsFile)).find((org) => org.clerkId === clerkOrgId);
+  if (known) return known;
+  if (!linking.has(clerkOrgId)) {
+    const work = (async () => {
+      const { name, emails } = await clerkDetails(clerkOrgId, clerkUserId);
+      const again = (await list(orgsFile)).find((org) => org.clerkId === clerkOrgId);
+      if (again) return again;
+      const legacy = roleAtLeast(role, 'admin') ? await unclaimedLegacyOrg(emails) : null;
+      if (legacy) return linkOrg(legacy.id, { clerkId: clerkOrgId, name: name || legacy.name });
+      const first = await isFirstOrg();
+      const org = await createOrg({ name: name || 'Organisation', clerkId: clerkOrgId, createdBy: clerkUserId });
+      if (first) await migrateLegacyInto(org);
+      return org;
+    })().finally(() => linking.delete(clerkOrgId));
+    linking.set(clerkOrgId, work);
+  }
+  return linking.get(clerkOrgId);
 }
 
 // ---------- moving the single-user setup into the first organisation ----------

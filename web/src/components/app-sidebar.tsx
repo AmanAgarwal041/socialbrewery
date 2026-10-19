@@ -1,12 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useClerk } from '@clerk/react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Building2, Check, ChevronRight, ChevronsUpDown, LayoutDashboard, LogOut, Plug, Plus, Settings, Sparkles } from 'lucide-react'
+import { Building2, Check, ChevronRight, ChevronsUpDown, CircleUser, LayoutDashboard, LogOut, Plug, Plus, Settings, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { BrewIcon } from '@/components/brand-icons'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +13,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
@@ -32,7 +29,7 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-import { safeImage, sendJson } from '@/lib/api'
+import { safeImage } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkState } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -54,102 +51,58 @@ function StatusDot({ on, className }: { on: boolean; className?: string }) {
   )
 }
 
-function NewOrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { refreshSession } = useAppState()
-  const navigate = useNavigate()
-  const [name, setName] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  async function create(event: FormEvent) {
-    event.preventDefault()
-    setSaving(true)
-    try {
-      await sendJson('/api/orgs', 'POST', { name })
-      await refreshSession()
-      onOpenChange(false)
-      setName('')
-      navigate('/settings')
-      toast.success(`${name} created. Add its keys next.`)
-    } catch (err) {
-      toast.error((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <form onSubmit={create} className="space-y-4">
-          <DialogHeader>
-            <DialogTitle>New organisation</DialogTitle>
-            <DialogDescription>It starts empty, with its own keys, connected accounts, posts, and Grok connector. You are its owner.</DialogDescription>
-          </DialogHeader>
-          <Input autoFocus required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme marketing" aria-label="Organisation name" />
-          <DialogFooter>
-            <Button type="submit" disabled={saving || !name.trim()}>
-              Create
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function OrgSwitcher() {
-  const { org, orgs, switchOrg } = useAppState()
+  const { org, clerkOrgId, orgs, switchOrg } = useAppState()
+  const clerk = useClerk()
   const navigate = useNavigate()
-  const [creating, setCreating] = useState(false)
+  const name = orgs.find((item) => item.id === clerkOrgId)?.name || org?.name
 
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
-            <div className="bg-palette flex aspect-square size-8 items-center justify-center rounded-xl text-ink shadow-sm">
-              <BrewIcon className="size-5" />
-            </div>
-            <div className="grid flex-1 text-left leading-tight">
-              <span className="truncate font-semibold">{org?.name || 'Socialbrewery'}</span>
-              <span className="truncate text-xs text-muted-foreground capitalize">{org ? `${org.role} · Socialbrewery` : 'Posting studio'}</span>
-            </div>
-            <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
-          </SidebarMenuButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-64">
-          <DropdownMenuLabel className="text-xs text-muted-foreground">Organisations</DropdownMenuLabel>
-          {orgs.map((item) => (
-            <DropdownMenuItem
-              key={item.id}
-              onSelect={() => {
-                if (item.id === org?.id) return
-                switchOrg(item.id)
-                  .then(() => navigate('/'))
-                  .catch((err) => toast.error(err.message))
-              }}
-            >
-              <Building2 />
-              <span className="flex-1 truncate">{item.name}</span>
-              {item.id === org?.id && <Check className="size-4" />}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => navigate('/organisation')}>
-            <Settings /> Manage organisation
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
+          <div className="bg-palette flex aspect-square size-8 items-center justify-center rounded-xl text-ink shadow-sm">
+            <BrewIcon className="size-5" />
+          </div>
+          <div className="grid flex-1 text-left leading-tight">
+            <span className="truncate font-semibold">{name || 'Socialbrewery'}</span>
+            <span className="truncate text-xs text-muted-foreground capitalize">{org ? `${org.role} · Socialbrewery` : 'Posting studio'}</span>
+          </div>
+          <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Organisations</DropdownMenuLabel>
+        {orgs.map((item) => (
+          <DropdownMenuItem
+            key={item.id}
+            onSelect={() => {
+              if (item.id === clerkOrgId) return
+              switchOrg(item.id)
+                .then(() => navigate('/'))
+                .catch((err) => toast.error(err.message))
+            }}
+          >
+            <Building2 />
+            <span className="flex-1 truncate">{item.name}</span>
+            {item.id === clerkOrgId && <Check className="size-4" />}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setCreating(true)}>
-            <Plus /> New organisation
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <NewOrgDialog open={creating} onOpenChange={setCreating} />
-    </>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => navigate('/organisation')}>
+          <Settings /> Manage organisation
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => clerk.openCreateOrganization({ afterCreateOrganizationUrl: '/settings' })}>
+          <Plus /> New organisation
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
 function UserMenu() {
   const { user, signOut } = useAppState()
+  const clerk = useClerk()
   if (!user) return null
   const initials = (user.name || user.email)
     .split(/\s+/)
@@ -172,6 +125,9 @@ function UserMenu() {
         </SidebarMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
+        <DropdownMenuItem onSelect={() => clerk.openUserProfile()}>
+          <CircleUser /> Account
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => signOut()}>
           <LogOut /> Sign out
         </DropdownMenuItem>

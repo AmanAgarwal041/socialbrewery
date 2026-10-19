@@ -88,7 +88,7 @@ function fakeR2() {
 
 const videoFile = (name) => `${dataDir}/orgs/${'b'.repeat(24)}/media/${name}.mp4`;
 
-test('the Workers backend keeps accounts in D1 and videos in R2', async () => {
+test('the Workers backend keeps organisations in D1 and videos in R2', async () => {
   const db = fakeD1();
   const bucket = fakeR2();
   useStorage(cloudflareStorage({ db, bucket }));
@@ -96,10 +96,9 @@ test('the Workers backend keeps accounts in D1 and videos in R2', async () => {
   const { runWithOrg } = await import('../src/context.js');
   const store = await import('../src/store.js');
 
-  const owner = await accounts.upsertUser({ provider: 'github', subject: '9', email: 'lin@example.com', name: 'Lin' });
-  const org = await accounts.createOrg({ name: 'Edge', ownerId: owner.id, config: { XAI_API_KEY: 'xai-edge-secret' } });
-  const session = await accounts.createSession(owner.id, org.id);
-  assert.equal((await accounts.getSession(session.token)).userId, owner.id);
+  const org = await accounts.createOrg({ name: 'Edge', clerkId: 'org_edge', config: { XAI_API_KEY: 'xai-edge-secret' } });
+  assert.equal((await accounts.orgForClerk({ clerkOrgId: 'org_edge', clerkUserId: 'user_lin', role: 'admin' })).id, org.id);
+  assert.match(db.documents.get('system/orgs.json'), /org_edge/);
 
   const configRow = db.documents.get(`orgs/${org.id}/config.json`);
   assert.ok(configRow, 'organisation settings are a D1 row');

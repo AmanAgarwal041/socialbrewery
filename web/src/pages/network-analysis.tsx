@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, formatCount, postJson, postNetwork, safeImage, safeLink, timeAgo, type HashnodeArticle, type RedditStat, type Review, type SlackStat, type Video } from '@/lib/api'
+import { api, formatCount, navigateSignedIn, postJson, postNetwork, safeImage, safeLink, timeAgo, type HashnodeArticle, type RedditStat, type Review, type SlackStat, type Video } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { SLOT_CLASSES, networkState, type NetworkMeta } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -168,7 +168,15 @@ function YoutubeAnalysis({ network }: { network: NetworkMeta }) {
           {expired && <p>Google test-mode logins expire after 7 days. Publish the consent screen to keep them longer.</p>}
           <div className="mt-2 flex gap-2">
             <Button asChild size="sm">
-              <a href="/api/youtube/connect">Reconnect YouTube</a>
+              <a
+                href="/api/youtube/connect"
+                onClick={(event) => {
+                  event.preventDefault()
+                  navigateSignedIn('/api/youtube/connect')
+                }}
+              >
+                Reconnect YouTube
+              </a>
             </Button>
             <Button size="sm" variant="outline" onClick={load}>
               <RefreshCw /> Try again

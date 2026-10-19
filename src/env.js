@@ -7,10 +7,8 @@ export const SYSTEM_FIELDS = [
   { key: 'HOST', label: 'Host', secret: false, help: '127.0.0.1 keeps the app on this computer. Use 0.0.0.0 only behind HTTPS.' },
   { key: 'PORT', label: 'Port', secret: false, help: 'Port the server listens on.' },
   { key: 'APP_URL', label: 'App URL', secret: false, help: 'Public address of the app. Every OAuth redirect starts with it.' },
-  { key: 'GOOGLE_AUTH_CLIENT_ID', label: 'Google sign-in client ID', secret: false, help: 'OAuth client for signing in to Socialbrewery with Google.' },
-  { key: 'GOOGLE_AUTH_CLIENT_SECRET', label: 'Google sign-in client secret', secret: true, help: '' },
-  { key: 'GITHUB_AUTH_CLIENT_ID', label: 'GitHub sign-in client ID', secret: false, help: 'OAuth app for signing in to Socialbrewery with GitHub.' },
-  { key: 'GITHUB_AUTH_CLIENT_SECRET', label: 'GitHub sign-in client secret', secret: true, help: '' },
+  { key: 'CLERK_PUBLISHABLE_KEY', label: 'Clerk publishable key', secret: false, help: 'pk_test_… or pk_live_… from the Clerk dashboard (API keys). Sign-in and organisations run on Clerk.' },
+  { key: 'CLERK_SECRET_KEY', label: 'Clerk secret key', secret: true, help: 'sk_test_… or sk_live_… from the same page.' },
 ];
 
 // Per-organisation settings: encrypted in data/orgs/<id>/config.json and edited by organisation admins.
@@ -167,10 +165,8 @@ export function systemDefaults() {
     HOST: '127.0.0.1',
     PORT: '3847',
     APP_URL: 'http://127.0.0.1:3847',
-    GOOGLE_AUTH_CLIENT_ID: '',
-    GOOGLE_AUTH_CLIENT_SECRET: '',
-    GITHUB_AUTH_CLIENT_ID: '',
-    GITHUB_AUTH_CLIENT_SECRET: '',
+    CLERK_PUBLISHABLE_KEY: '',
+    CLERK_SECRET_KEY: '',
   };
 }
 

@@ -2,7 +2,7 @@
 
 A local app for posting YouTube Shorts, LinkedIn posts, Instagram Reels, X posts, Hashnode articles, Slack messages, and Reddit posts. Grok writes the caption, can generate a vertical clip, and uploads it to the accounts you connect.
 
-People sign in with Google or GitHub. Everything that posts belongs to an **organisation**: the xAI and OpenAI keys, every network's app credentials and connected accounts, posts, media, chat history, and the Grok connector. Each organisation keeps its own, encrypted on disk, so several teams can share one server without seeing each other's keys or accounts.
+People sign in with Clerk. Everything that posts belongs to an **organisation**: the xAI and OpenAI keys, every network's app credentials and connected accounts, posts, media, chat history, and the Grok connector. Each organisation keeps its own, encrypted on disk, so several teams can share one server without seeing each other's keys or accounts.
 
 It runs on `127.0.0.1` by default. Set `HOST` and an https `APP_URL` in `.env` to serve it to a team.
 
@@ -19,15 +19,17 @@ Open [http://127.0.0.1:3847](http://127.0.0.1:3847).
 
 ## Sign-in and organisations
 
-Whoever runs the server sets up sign-in once, in `.env`, then restarts (see `.env.example`):
+Sign-in, people, and organisations run on [Clerk](https://clerk.com). Whoever runs the server sets it up once, then restarts (see `.env.example`):
 
-- **GitHub**: github.com → Settings → Developer settings → OAuth Apps → New OAuth App. Callback URL: `http://127.0.0.1:3847/auth/github/callback`. Put the client ID and a client secret in `GITHUB_AUTH_CLIENT_ID` and `GITHUB_AUTH_CLIENT_SECRET`.
-- **Google**: Google Cloud → APIs & Services → Credentials → OAuth client ID (Web application). Redirect URI: `http://127.0.0.1:3847/auth/google/callback`. Use `GOOGLE_AUTH_CLIENT_ID` and `GOOGLE_AUTH_CLIENT_SECRET`.
+1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com) and pick the sign-in methods (Google, GitHub, email, …).
+2. Turn on **Organizations** (Configure → Organizations). Socialbrewery always works inside an organisation, so turning off personal accounts there ("Membership required") is a good fit.
+3. Copy **API keys** into `.env`: `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. On Clerk's production instance, add your `APP_URL` domain.
 
-Until one is set, the sign-in page shows these steps and the exact callback URLs.
+Until the keys are set, the sign-in page shows these steps.
 
-- The first sign-in creates an organisation with you as owner. On an existing install, the very first organisation also takes over the old keys from `.env`, the connected accounts, posts, and media, and those keys are removed from `.env`.
-- Owners and admins invite people from **Organisation** by email. The invite link only works for that email, and signing in with that email joins automatically. Roles: **owner** (everything, including other owners), **admin** (keys, connected accounts, invites, the connector URL), **member** (post, Brew, analysis with the organisation's accounts).
+- Each Clerk organisation has its own Socialbrewery organisation, created the first time someone opens it. On a fresh install, the very first one also takes over the old single-user keys from `.env`, the connected accounts, posts, and media, and those keys are removed from `.env`.
+- Organisations made with the sign-in that Socialbrewery had before Clerk carry over: the first Clerk organisation one of its owners opens as an admin, signed in with the same verified email, takes over its keys, connected accounts, and posts.
+- Members, invites, roles, and the name are managed in Clerk, from **Organisation** in the sidebar. Roles: **admin** (keys, connected accounts, invites, the connector URL) and **member** (post, Brew, analysis with the organisation's accounts). A custom Clerk role named `owner` also counts as admin; any other custom role counts as member.
 - Anyone can create more organisations from the switcher at the top of the sidebar. Each starts empty.
 
 ### Encryption
@@ -49,13 +51,13 @@ The same app runs as a Worker on the Workers Free plan, with no server to keep r
 4. Add the secrets:
    ```bash
    npx wrangler secret put SOCIALBREWERY_MASTER_KEY   # openssl rand -base64 32, and keep a copy
-   npx wrangler secret put GITHUB_AUTH_CLIENT_ID       # and/or the GOOGLE_AUTH_* pair
-   npx wrangler secret put GITHUB_AUTH_CLIENT_SECRET
+   npx wrangler secret put CLERK_PUBLISHABLE_KEY      # pk_live_… (or put it in "vars" in wrangler.jsonc)
+   npx wrangler secret put CLERK_SECRET_KEY           # sk_live_…
    ```
 5. `npm run cf:deploy`. The D1 tables are created on the first request. Until the key, `APP_URL`, and the D1 binding are set, the Worker answers with a list of what is missing.
-6. Point the sign-in and network OAuth apps at redirect URIs that start with `APP_URL`.
+6. Point the network OAuth apps at redirect URIs that start with `APP_URL`, and add the domain to your Clerk production instance.
 
-To try it locally first, put `SOCIALBREWERY_MASTER_KEY` and `APP_URL=http://127.0.0.1:8787` in `.dev.vars` (ignored by git), then run `npm run cf:dev`. This uses a local D1.
+To try it locally first, put `SOCIALBREWERY_MASTER_KEY`, `APP_URL=http://127.0.0.1:8787`, and the Clerk test keys in `.dev.vars` (ignored by git), then run `npm run cf:dev`. This uses a local D1.
 
 **Where videos go.** Attached videos, Grok-generated Shorts, and videos the grok.com connector fetches from a `videoUrl` all have to be stored before they can be posted. By default they are kept in D1:
 
@@ -88,14 +90,14 @@ Socialbrewery runs on any machine with Node.js 20 (a VM, a home server, a Mac). 
    cloudflared tunnel route dns socialbrewery brew.example.com
    ```
 3. Copy `cloudflare/config.example.yml` to `cloudflare/config.yml` (git-ignored) and fill in the tunnel ID, credentials file, and hostname.
-4. In `.env`, keep `HOST=127.0.0.1` and set `APP_URL=https://brew.example.com`. Update every OAuth app (sign-in and networks) to redirect URIs that start with that URL; the sign-in page and each Connection tab show them.
+4. In `.env`, keep `HOST=127.0.0.1` and set `APP_URL=https://brew.example.com`. Update every network OAuth app to redirect URIs that start with that URL (each Connection tab shows them), and add the domain to Clerk.
 5. Start both, each under a service manager (launchd, systemd, pm2) so they come back after a reboot:
    ```bash
    npm start
    npm run tunnel
    ```
 
-With an https `APP_URL`, sign-in cookies are `Secure`, the Grok connector and Instagram use that URL directly (no `MCP_PUBLIC_URL` needed), and the Instagram webhook callback URL is ready for Meta. Variables set on the process override `.env`, so a service manager can supply `APP_URL` and the sign-in keys instead.
+With an https `APP_URL`, Socialbrewery's cookies are `Secure`, the Grok connector and Instagram use that URL directly (no `MCP_PUBLIC_URL` needed), and the Instagram webhook callback URL is ready for Meta. Variables set on the process override `.env`, so a service manager can supply `APP_URL` and the Clerk keys instead.
 
 Limits to know:
 
@@ -111,7 +113,7 @@ The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is 
 - **Brew**: chat with Grok. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
 - **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.
 - **Connectors → Grok connector**: the URL and tools for grok.com.
-- **Organisation**: members, roles, invites, and the name.
+- **Organisation**: members, roles, invites, and the name (Clerk's organisation profile).
 - **Settings**: this organisation's keys grouped by service (owners and admins), plus Appearance.
 
 The whole palette comes from one constant, `PALETTE` in `web/src/theme.ts` (default [#9FA1FF #B5BAFF #AEE2FF #D9F9DF](https://colorhunt.co/palette/9fa1ffb5baffaee2ffd9f9df)). Every color, including shadcn’s tokens, is derived from those four swatches in `web/src/index.css`. Settings → Appearance switches palettes in the browser without a rebuild.
@@ -163,9 +165,9 @@ If a Google test app is left in testing mode, the refresh token expires after 7 
 
 | Path | Contents |
 |---|---|
-| `.env` | Server settings and sign-in apps |
+| `.env` | Server settings and Clerk keys |
 | `.master.key` | Encryption master key (unless `SOCIALBREWERY_MASTER_KEY` is set) |
-| `data/system/` | Users, organisations, memberships, invites, sessions (hashed) |
+| `data/system/orgs.json` | Organisations and the Clerk organisation each belongs to (people and memberships are in Clerk) |
 | `data/orgs/<id>/config.json` | The organisation's keys, encrypted |
 | `data/orgs/<id>/token-<network>.json` | Connected account tokens, encrypted |
 | `data/orgs/<id>/media/` | Attached and generated videos |

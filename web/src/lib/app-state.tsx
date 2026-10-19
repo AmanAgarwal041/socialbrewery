@@ -1,24 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import {
-  SIGNED_OUT_EVENT,
-  allowLinkHost,
-  api,
-  sendJson,
-  type Connectors,
-  type Health,
-  type OrgSummary,
-  type Post,
-  type Role,
-  type Session,
-  type User,
-} from '@/lib/api'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useAuth, useClerk, useOrganizationList, useUser } from '@clerk/react'
+import { SIGNED_OUT_EVENT, allowLinkHost, api, type Connectors, type Health, type OrgSummary, type Post, type Role, type Session, type User } from '@/lib/api'
+
+// A Clerk organisation the user belongs to. `id` is Clerk's organisation id.
+export type ClerkOrg = { id: string; name: string; role: Role }
 
 type AppState = {
   session: Session | null
   sessionError: string
   user: User | null
   org: OrgSummary | null
-  orgs: OrgSummary[]
+  clerkOrgId: string | null
+  orgs: ClerkOrg[]
   role: Role | null
   canManage: boolean
   health: Health | null
@@ -27,22 +20,41 @@ type AppState = {
   refresh: () => Promise<void>
   refreshPosts: () => Promise<void>
   refreshSession: () => Promise<Session>
-  switchOrg: (orgId: string) => Promise<void>
+  switchOrg: (clerkOrgId: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AppStateContext = createContext<AppState | null>(null)
 
+function clerkRole(role: string): Role {
+  const name = role.replace(/^org:/, '')
+  return name === 'owner' || name === 'admin' ? name : 'member'
+}
+
 export function AppStateProvider({ children }: { children: ReactNode }) {
+  const { isSignedIn, orgId: clerkOrgId } = useAuth()
+  const { user: clerkUser } = useUser()
+  const clerk = useClerk()
+  const { userMemberships, setActive } = useOrganizationList({ userMemberships: { infinite: true, pageSize: 50 } })
   const [session, setSession] = useState<Session | null>(null)
   const [sessionError, setSessionError] = useState('')
   const [health, setHealth] = useState<Health | null>(null)
   const [connectors, setConnectors] = useState<Connectors | null>(null)
   const [posts, setPosts] = useState<Post[] | null>(null)
 
-  const signedIn = session?.authenticated ? session : null
-  const org = signedIn?.org ?? null
+  const org = session?.authenticated ? session.org : null
   const role = org?.role ?? null
+
+  const user = useMemo<User | null>(() => {
+    if (!clerkUser) return null
+    const email = clerkUser.primaryEmailAddress?.emailAddress || ''
+    return { id: clerkUser.id, email, name: clerkUser.fullName || clerkUser.username || email, picture: clerkUser.imageUrl || '' }
+  }, [clerkUser])
+
+  const orgs = useMemo<ClerkOrg[]>(
+    () => (userMemberships.data || []).map((m) => ({ id: m.organization.id, name: m.organization.name, role: clerkRole(m.role) })),
+    [userMemberships.data],
+  )
 
   const refreshSession = useCallback(async () => {
     try {
@@ -72,33 +84,34 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const switchOrg = useCallback(
-    async (orgId: string) => {
-      await sendJson('/api/session/org', 'POST', { orgId })
-      setHealth(null)
-      setConnectors(null)
-      setPosts(null)
-      await refreshSession()
+    async (next: string) => {
+      if (!setActive) return
+      await setActive({ organization: next })
     },
-    [refreshSession],
+    [setActive],
   )
 
   const signOut = useCallback(async () => {
-    await sendJson('/auth/logout', 'POST').catch(() => {})
+    await clerk.signOut({ redirectUrl: '/' })
+  }, [clerk])
+
+  // Whatever Clerk says is the active organisation (switcher, invite accepted, created) is the one the
+  // server acts in, so start over whenever it changes.
+  useEffect(() => {
+    setSession(null)
     setHealth(null)
     setConnectors(null)
     setPosts(null)
-    setSession({ authenticated: false, providers: session?.providers ?? { google: { enabled: false, redirectUri: '' }, github: { enabled: false, redirectUri: '' } } })
-    await refreshSession().catch(() => {})
-  }, [refreshSession, session?.providers])
+    if (isSignedIn && clerkOrgId) refreshSession().catch(() => {})
+  }, [isSignedIn, clerkOrgId, refreshSession])
 
   useEffect(() => {
-    refreshSession().catch(() => {})
     const onSignedOut = () => {
-      refreshSession().catch(() => {})
+      if (isSignedIn && clerkOrgId) refreshSession().catch(() => {})
     }
     window.addEventListener(SIGNED_OUT_EVENT, onSignedOut)
     return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut)
-  }, [refreshSession])
+  }, [isSignedIn, clerkOrgId, refreshSession])
 
   const orgId = org?.id
   useEffect(() => {
@@ -112,9 +125,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       value={{
         session,
         sessionError,
-        user: signedIn?.user ?? null,
+        user,
         org,
-        orgs: signedIn?.orgs ?? [],
+        clerkOrgId: clerkOrgId ?? null,
+        orgs,
         role,
         canManage: role === 'owner' || role === 'admin',
         health,
