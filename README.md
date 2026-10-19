@@ -1,6 +1,75 @@
-# Socialbrewery
+<p align="center">
+  <img src="web/public/socialbrewery-icon.png" alt="Socialbrewery" width="96" height="96" />
+</p>
 
-A local app for posting YouTube Shorts, LinkedIn posts, Instagram Reels, X posts, Hashnode articles, Slack messages, and Reddit posts. Grok writes the caption, can generate a vertical clip, and uploads it to the accounts you connect.
+<h1 align="center">Socialbrewery</h1>
+
+<p align="center">
+  <strong>Tell Grok what to make. It writes, films, and posts.</strong><br />
+  A posting studio for YouTube Shorts, LinkedIn, Instagram Reels, X, Hashnode, Slack, and Reddit, with a Grok agent and an MCP connector for your own agents.
+</p>
+
+<p align="center">
+  <a href="https://socialbrewery.agarwal-aman041.workers.dev"><strong>Open Socialbrewery</strong></a>
+  ·
+  <a href="https://socialbrewery.agarwal-aman041.workers.dev/overview">Take a look around (no sign-in)</a>
+  ·
+  <a href="#start">Run it yourself</a>
+</p>
+
+![The Socialbrewery overview: a Brew with Grok prompt, post counts, and every network](public/landing/overview.jpg)
+
+## Why Socialbrewery
+
+- **Brew with Grok.** Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
+- **Seven networks, one dashboard.** Each network has Overview, Posts, Compose, Analysis, and Connection tabs, so you can also post by hand.
+- **AI performance reviews.** YouTube Analysis shows channel stats and reviews each video with Grok or OpenAI.
+- **Built for teams.** Organisations and roles (admin, member) via Clerk. Every organisation's keys and account tokens are encrypted with AES-256-GCM and never sent back to the browser.
+- **For agents.** A custom MCP connector, so Grok on grok.com, Claude, or any MCP client can post, reply, edit, and review through it.
+- **Runs anywhere.** On Cloudflare Workers with D1 on the Free plan, or locally on Node.js 20 with no runtime dependencies.
+
+## Networks
+
+| Network | What it posts |
+|---|---|
+| YouTube Shorts | Shorts (Grok-generated or your own video), edits to title, description, tags, and privacy, channel stats and AI reviews |
+| LinkedIn | Text and video posts, link previews, comments |
+| Instagram Reels | Reels to a professional account, optional comment and message webhooks |
+| X | Posts with text or video, replies and threads |
+| Hashnode | Markdown articles and drafts, views, reactions, and comments |
+| Slack | Messages and clips in your workspace, thread replies |
+| Reddit | Text and link posts. Without approved API keys it runs in manual mode: it drafts the post and opens Reddit's own submit page |
+
+## A look inside
+
+| | |
+|---|---|
+| ![Brew: chat with Grok, with ready-made prompts for every network](public/landing/brew.jpg) | ![Compose: the YouTube Compose tab with a "Let Grok write it" button](public/landing/compose.jpg) |
+| **Brew.** Chat with Grok, pick a target network, attach a video, and watch each step. | **Compose.** Post by hand with each network's own fields. |
+| ![Connectors: every network with its status](public/landing/connectors.jpg) | ![Connection: setup steps and the redirect URI for YouTube](public/landing/connection.jpg) |
+| **Connectors.** Every network and its status at a glance. | **Connection.** Exact setup steps and the redirect URI to paste. |
+| ![Grok connector: the MCP connector URL and its tools](public/landing/mcp-connector.jpg) | ![Settings: palette and AI models, including Grok or OpenAI for reviews](public/landing/settings.jpg) |
+| **MCP connector.** The URL and tools for your agent. | **Settings.** Encrypted keys per organisation, AI models, and palettes. |
+
+## Use it from your agent (MCP)
+
+Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its own connector URL, and its token decides whose keys and accounts are used.
+
+1. Sign in as an organisation admin and open **Connectors → Grok connector**.
+2. Copy the connector URL. Treat it like a password; **Rotate token** replaces it at once.
+3. Add it as a custom connector in your agent: on [grok.com/connectors](https://grok.com/connectors) choose **New Connector → Custom**, or add it as a remote MCP server in Claude or another MCP client.
+4. Ask things like "Post an unlisted Short of rain on a copper kettle", "Post this to LinkedIn", or "How did my latest video do?"
+
+Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
+
+## Part of a product family
+
+- [MetaInfo](https://metainfo.agarwal-aman041.workers.dev): SEO and AI-search visibility audits.
+- [ProductRoot](https://productroot.agarwal-aman041.workers.dev): a launch readiness planner.
+
+---
+
+## How it works
 
 People sign in with Clerk. Everything that posts belongs to an **organisation**: the xAI and OpenAI keys, every network's app credentials and connected accounts, posts, media, chat history, and the Grok connector. Each organisation keeps its own, encrypted on disk, so several teams can share one server without seeing each other's keys or accounts.
 
@@ -109,6 +178,7 @@ Limits to know:
 
 The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is in `web/`, and the built files are committed in `public/`, so `npm start` needs no install.
 
+- **Landing page**: signed-out visitors at `/` see the landing page (`web/src/pages/landing.tsx`, screenshots in `web/public/landing/`). `/overview` and every other page open the dashboard in a read-only exploring mode. Signed in, `/` is the Overview.
 - **Overview**: post counts, connector status, setup checklist, and a quick prompt into Brew.
 - **Brew**: chat with Grok. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
 - **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.

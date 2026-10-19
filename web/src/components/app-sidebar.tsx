@@ -164,7 +164,7 @@ function UserMenu() {
 }
 
 export function AppSidebar() {
-  const { health, connectors, posts } = useAppState()
+  const { health, connectors, posts, guest } = useAppState()
   const { pathname } = useLocation()
 
   return (
@@ -182,8 +182,8 @@ export function AppSidebar() {
           <SidebarGroupLabel>Studio</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={pathname === '/'} tooltip="Overview">
-                <NavLink to="/" end>
+              <SidebarMenuButton asChild isActive={pathname === '/' || pathname === '/overview'} tooltip="Overview">
+                <NavLink to={guest ? '/overview' : '/'} end>
                   <LayoutDashboard />
                   <span>Overview</span>
                 </NavLink>

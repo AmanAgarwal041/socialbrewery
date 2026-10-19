@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { ClerkConfig, Session } from '@/lib/api'
 import { AppStateProvider, useAppState } from '@/lib/app-state'
 import { BrewPage } from '@/pages/brew'
+import { LandingPage } from '@/pages/landing'
 import { ConnectorsPage, GrokConnectorPage } from '@/pages/connectors'
 import { AuthSplash, ChooseOrgPage, LoginPage, SetupPage } from '@/pages/login'
 import { NetworkPage } from '@/pages/network'
@@ -23,7 +24,12 @@ function AppRoutes() {
   const { pathname } = useLocation()
 
   if (!isLoaded) return <AuthSplash />
-  if (!isSignedIn) return pathname === '/login' ? <LoginPage /> : <DashboardRoutes />
+  if (!isSignedIn) {
+    // Signed out: the landing page at /, sign-in at /login, and every other route explores the dashboard.
+    if (pathname === '/login') return <LoginPage />
+    if (pathname === '/') return <LandingPage />
+    return <DashboardRoutes />
+  }
   if (pending || !orgId) return <ChooseOrgPage pending={pending} />
   if (!session && sessionError) return <AuthSplash error={sessionError} onRetry={() => refreshSession().catch(() => {})} />
   if (session && !session.authenticated) {
@@ -44,12 +50,14 @@ function AppRoutes() {
   return <DashboardRoutes />
 }
 
-// Signed in, or exploring as a guest: the same pages either way.
+// Signed in, or exploring as a guest: the same pages either way. Guests reach the overview at /overview,
+// because / is the landing page for them.
 function DashboardRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<OverviewPage />} />
+        <Route path="overview" element={<OverviewPage />} />
         <Route path="brew" element={<BrewPage />} />
         <Route path="connectors" element={<ConnectorsPage />} />
         <Route path="connectors/grok" element={<GrokConnectorPage />} />

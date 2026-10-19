@@ -28,7 +28,7 @@ const TAB_LABELS: Record<string, string> = {
 
 function crumbs(pathname: string): { label: string; to?: string }[] {
   const parts = pathname.split('/').filter(Boolean)
-  if (!parts.length) return [{ label: 'Overview' }]
+  if (!parts.length || parts[0] === 'overview') return [{ label: 'Overview' }]
   if (parts[0] === 'brew') return [{ label: 'Brew' }]
   if (parts[0] === 'settings') return [{ label: 'Settings' }]
   if (parts[0] === 'organisation') return [{ label: 'Organisation' }]
