@@ -1,7 +1,8 @@
 import { OrganizationProfile } from '@clerk/react'
-import { Building2 } from 'lucide-react'
+import { Building2, LogIn } from 'lucide-react'
 import { PageHeader } from '@/components/common'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { Role } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
@@ -13,7 +14,7 @@ const ROLE_HELP: Record<Exclude<Role, 'owner'>, string> = {
 
 // Members, invites, roles, and the name are Clerk's; everything else here belongs to this organisation.
 export function OrganisationPage() {
-  const { org, orgs, clerkOrgId, canManage } = useAppState()
+  const { org, orgs, clerkOrgId, canManage, guest, signIn } = useAppState()
   const name = orgs.find((item) => item.id === clerkOrgId)?.name || org?.name
 
   return (
@@ -28,10 +29,23 @@ export function OrganisationPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="min-w-0 overflow-x-auto">
-          <OrganizationProfile routing="hash" />
+          {guest ? (
+            <Alert>
+              <Building2 />
+              <AlertTitle>Organisations are for your team</AlertTitle>
+              <AlertDescription>
+                <p>Sign in to create one, invite teammates, and give each of them a role. Everyone in it posts through the same connected accounts.</p>
+                <Button size="sm" className="mt-2" onClick={signIn}>
+                  <LogIn /> Sign in
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <OrganizationProfile routing="hash" />
+          )}
         </div>
         <div className="space-y-4">
-          {!canManage && (
+          {!canManage && !guest && (
             <Alert>
               <Building2 />
               <AlertTitle>You are a member</AlertTitle>

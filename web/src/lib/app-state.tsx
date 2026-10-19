@@ -1,11 +1,31 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAuth, useClerk, useOrganizationList, useUser } from '@clerk/react'
-import { SIGNED_OUT_EVENT, allowLinkHost, api, type Connectors, type Health, type OrgSummary, type Post, type Role, type Session, type User } from '@/lib/api'
+import {
+  SIGNED_OUT_EVENT,
+  SIGN_IN_EVENT,
+  allowLinkHost,
+  api,
+  guestConnectors,
+  guestHealth,
+  type Connectors,
+  type Health,
+  type OrgSummary,
+  type Post,
+  type Role,
+  type Session,
+  type User,
+} from '@/lib/api'
 
 // A Clerk organisation the user belongs to. `id` is Clerk's organisation id.
 export type ClerkOrg = { id: string; name: string; role: Role }
 
+// Signed out, the dashboard runs as a guest: an organisation with nothing set up yet, so people can look
+// around. Anything that would change something opens Clerk's sign-in instead.
+const GUEST_ORG: OrgSummary = { id: 'guest', name: 'Socialbrewery', role: 'admin' }
+
 type AppState = {
+  guest: boolean
+  signIn: () => void
   session: Session | null
   sessionError: string
   user: User | null
@@ -32,7 +52,8 @@ function clerkRole(role: string): Role {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const { isSignedIn, orgId: clerkOrgId } = useAuth()
+  const { isLoaded, isSignedIn, orgId: clerkOrgId } = useAuth()
+  const guest = isLoaded && !isSignedIn
   const { user: clerkUser } = useUser()
   const clerk = useClerk()
   const { userMemberships, setActive } = useOrganizationList({ userMemberships: { infinite: true, pageSize: 50 } })
@@ -42,7 +63,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [connectors, setConnectors] = useState<Connectors | null>(null)
   const [posts, setPosts] = useState<Post[] | null>(null)
 
-  const org = session?.authenticated ? session.org : null
+  const org = guest ? GUEST_ORG : session?.authenticated ? session.org : null
   const role = org?.role ?? null
 
   const user = useMemo<User | null>(() => {
@@ -74,6 +95,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refresh = useCallback(async () => {
+    if (guest) {
+      setHealth(guestHealth())
+      setConnectors(guestConnectors())
+      return
+    }
     await Promise.all([
       api<Health>('/api/health').then(setHealth),
       api<Connectors>('/api/connectors').then((next) => {
@@ -81,7 +107,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setConnectors(next)
       }),
     ])
-  }, [])
+  }, [guest])
 
   const switchOrg = useCallback(
     async (next: string) => {
@@ -94,6 +120,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await clerk.signOut({ redirectUrl: '/' })
   }, [clerk])
+
+  const signIn = useCallback(() => {
+    clerk.openSignIn({ withSignUp: true, forceRedirectUrl: window.location.pathname + window.location.search })
+  }, [clerk])
+
+  useEffect(() => {
+    window.addEventListener(SIGN_IN_EVENT, signIn)
+    return () => window.removeEventListener(SIGN_IN_EVENT, signIn)
+  }, [signIn])
 
   // Whatever Clerk says is the active organisation (switcher, invite accepted, created) is the one the
   // server acts in, so start over whenever it changes.
@@ -123,6 +158,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   return (
     <AppStateContext.Provider
       value={{
+        guest,
+        signIn,
         session,
         sessionError,
         user,

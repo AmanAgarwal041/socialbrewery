@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { appUrl, loadEnv, normalizeOrgSettings, normalizeSystem, orgSettingsView, secureCookies } from './env.js';
+import { appUrl, loadEnv, normalizeOrgSettings, normalizeSystem, orgDefaults, orgSettingsView, secureCookies } from './env.js';
 import {
   findOrgByConnectorToken,
   getOrg,
@@ -535,6 +535,17 @@ async function route(req, res) {
       return;
     }
     await runWithOrg(ctx, async () => sendJson(res, 200, await health()));
+    return;
+  }
+
+  // Signed-out visitors can look around the dashboard: Settings shows which keys exist, all empty.
+  if (req.method === 'GET' && pathname === '/api/settings') {
+    const ctx = await signedInContext(req).catch(() => null);
+    if (!ctx) {
+      sendJson(res, 200, { managed: orgSettingsView(orgDefaults()), redirectUri: redirectUri(), guest: true });
+      return;
+    }
+    await runWithOrg(ctx, () => orgRoute(req, res, url, ctx));
     return;
   }
 

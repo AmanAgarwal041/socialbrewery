@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AppSidebar } from '@/components/app-sidebar'
+import { Button } from '@/components/ui/button'
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -74,7 +75,7 @@ function StatusPills() {
 export function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { refresh } = useAppState()
+  const { refresh, guest, signIn } = useAppState()
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -114,10 +115,20 @@ export function Layout() {
               ))}
             </BreadcrumbList>
           </Breadcrumb>
-          <div className="ml-auto">
-            <StatusPills />
+          <div className="ml-auto flex items-center gap-3">
+            {!guest && <StatusPills />}
+            {guest && (
+              <Button size="sm" onClick={signIn}>
+                Sign in
+              </Button>
+            )}
           </div>
         </header>
+        {guest && (
+          <div className="shrink-0 border-b border-border/60 bg-p2-soft px-4 py-2 text-center text-sm text-p2-ink">
+            You're exploring Socialbrewery. Sign in to add keys, connect accounts, and post.
+          </div>
+        )}
         <div className={cn('min-h-0 flex-1', fullBleed ? 'flex flex-col' : 'overflow-y-auto')}>
           {fullBleed ? (
             <Outlet />

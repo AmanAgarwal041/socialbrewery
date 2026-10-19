@@ -191,6 +191,67 @@ export type SettingField = { key: string; label: string; value: string; secret: 
 export type Settings = { managed: SettingField[]; redirectUri: string }
 
 export const SIGNED_OUT_EVENT = 'socialbrewery:signed-out'
+// Signed-out visitors explore the dashboard; anything that would change something asks them to sign in.
+export const SIGN_IN_EVENT = 'socialbrewery:sign-in'
+
+export class SignInRequired extends Error {
+  constructor() {
+    super('Sign in to do that. You can keep looking around first.')
+  }
+}
+
+export function requestSignIn(): never {
+  window.dispatchEvent(new Event(SIGN_IN_EVENT))
+  throw new SignInRequired()
+}
+
+// What the pages read while signed out: an organisation with nothing set up or connected yet.
+const GUEST_READS: Record<string, unknown> = {
+  '/api/agent/history': { display: [] },
+  '/api/youtube/videos': { videos: [] },
+  '/api/hashnode/posts': { posts: [] },
+  '/api/slack/stats': { posts: [] },
+  '/api/reddit/stats': { posts: [] },
+  '/api/reddit/subreddits': { subreddits: [] },
+  '/api/slack/channels': { channels: [] },
+  '/api/instagram/events': { events: [] },
+  '/api/posts': { posts: [] },
+}
+
+export function guestHealth(): Health {
+  return {
+    ok: true,
+    bootId: 'guest',
+    maxUploadMb: 25,
+    xai: false,
+    youtubeApp: false,
+    youtubeConnected: false,
+    linkedinApp: false,
+    linkedinConnected: false,
+    instagramApp: false,
+    instagramConnected: false,
+    xApp: false,
+    xConnected: false,
+    hashnodeApp: false,
+    hashnodeConnected: false,
+    slackApp: false,
+    slackConnected: false,
+  } as Health
+}
+
+export function guestConnectors(): Connectors {
+  const callback = (network: string) => `${window.location.origin}/api/${network}/callback`
+  return {
+    youtube: { connected: false, channel: null, appReady: false, redirectUri: callback('youtube') },
+    linkedin: { connected: false, profile: null, appReady: false, redirectUri: callback('linkedin') },
+    instagram: { connected: false, account: null, appReady: false, redirectUri: callback('instagram'), needsPublicUrl: false, webhook: null },
+    x: { connected: false, account: null, appReady: false, redirectUri: callback('x') },
+    hashnode: { connected: false, account: null, appReady: false, redirectUri: '' },
+    slack: { connected: false, account: null, appReady: false, redirectUri: '', defaultChannel: '', manifest: '' },
+    reddit: { connected: false, account: null, appReady: false, redirectUri: callback('reddit') },
+    grok: { name: 'Socialbrewery', mcpUrl: '', localOnly: false, connectorsPage: 'https://grok.com/connectors' },
+  }
+}
 
 // The current Clerk session token, for this app's own endpoints. Clerk refreshes it (and the
 // __session cookie) as it nears its one-minute expiry.
@@ -199,21 +260,36 @@ export async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function isRead(options?: RequestInit) {
+  const method = (options?.method || 'GET').toUpperCase()
+  return method === 'GET' || method === 'HEAD'
+}
+
 export async function authedFetch(url: string, options?: RequestInit): Promise<Response> {
   const headers = new Headers(options?.headers)
   if (url.startsWith('/') && !headers.has('Authorization')) {
-    for (const [key, value] of Object.entries(await authHeaders())) headers.set(key, value)
+    const auth = await authHeaders()
+    if (!auth.Authorization && url.startsWith('/api/') && !isRead(options)) requestSignIn()
+    for (const [key, value] of Object.entries(auth)) headers.set(key, value)
   }
   return fetch(url, { ...options, headers })
 }
 
 // Full-page navigations (connect links) carry the __session cookie instead of a header, so refresh it first.
 export async function navigateSignedIn(url: string) {
-  await getToken().catch(() => null)
+  const token = await getToken().catch(() => null)
+  if (!token) {
+    window.dispatchEvent(new Event(SIGN_IN_EVENT))
+    return
+  }
   window.location.assign(url)
 }
 
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
+  if (url.startsWith('/api/') && isRead(options) && !(await getToken().catch(() => null))) {
+    const path = url.split('?')[0]
+    if (path in GUEST_READS) return structuredClone(GUEST_READS[path]) as T
+  }
   const res = await authedFetch(url, options)
   const text = await res.text().catch(() => '')
   let data: unknown = {}

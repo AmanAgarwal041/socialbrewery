@@ -23,7 +23,7 @@ function AppRoutes() {
   const { pathname } = useLocation()
 
   if (!isLoaded) return <AuthSplash />
-  if (!isSignedIn) return <LoginPage />
+  if (!isSignedIn) return pathname === '/login' ? <LoginPage /> : <DashboardRoutes />
   if (pending || !orgId) return <ChooseOrgPage pending={pending} />
   if (!session && sessionError) return <AuthSplash error={sessionError} onRetry={() => refreshSession().catch(() => {})} />
   if (session && !session.authenticated) {
@@ -41,7 +41,11 @@ function AppRoutes() {
   }
   if (!org) return <AuthSplash />
   if (pathname === '/login') return <Navigate to="/" replace />
+  return <DashboardRoutes />
+}
 
+// Signed in, or exploring as a guest: the same pages either way.
+function DashboardRoutes() {
   return (
     <Routes>
       <Route element={<Layout />}>

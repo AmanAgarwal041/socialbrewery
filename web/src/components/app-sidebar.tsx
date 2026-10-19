@@ -52,7 +52,7 @@ function StatusDot({ on, className }: { on: boolean; className?: string }) {
 }
 
 function OrgSwitcher() {
-  const { org, clerkOrgId, orgs, switchOrg } = useAppState()
+  const { org, clerkOrgId, orgs, switchOrg, guest, signIn } = useAppState()
   const clerk = useClerk()
   const navigate = useNavigate()
   const name = orgs.find((item) => item.id === clerkOrgId)?.name || org?.name
@@ -66,43 +66,70 @@ function OrgSwitcher() {
           </div>
           <div className="grid flex-1 text-left leading-tight">
             <span className="truncate font-semibold">{name || 'Socialbrewery'}</span>
-            <span className="truncate text-xs text-muted-foreground capitalize">{org ? `${org.role} · Socialbrewery` : 'Posting studio'}</span>
+            <span className="truncate text-xs text-muted-foreground capitalize">
+              {guest ? 'Exploring · Posting studio' : org ? `${org.role} · Socialbrewery` : 'Posting studio'}
+            </span>
           </div>
           <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
         </SidebarMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Organisations</DropdownMenuLabel>
-        {orgs.map((item) => (
-          <DropdownMenuItem
-            key={item.id}
-            onSelect={() => {
-              if (item.id === clerkOrgId) return
-              switchOrg(item.id)
-                .then(() => navigate('/'))
-                .catch((err) => toast.error(err.message))
-            }}
-          >
-            <Building2 />
-            <span className="flex-1 truncate">{item.name}</span>
-            {item.id === clerkOrgId && <Check className="size-4" />}
+        {guest ? (
+          <DropdownMenuItem onSelect={signIn}>
+            <Plus /> Sign in to create an organisation
           </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/organisation')}>
-          <Settings /> Manage organisation
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => clerk.openCreateOrganization({ afterCreateOrganizationUrl: '/settings' })}>
-          <Plus /> New organisation
-        </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Organisations</DropdownMenuLabel>
+            {orgs.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onSelect={() => {
+                  if (item.id === clerkOrgId) return
+                  switchOrg(item.id)
+                    .then(() => navigate('/'))
+                    .catch((err) => toast.error(err.message))
+                }}
+              >
+                <Building2 />
+                <span className="flex-1 truncate">{item.name}</span>
+                {item.id === clerkOrgId && <Check className="size-4" />}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate('/organisation')}>
+              <Settings /> Manage organisation
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                clerk.openCreateOrganization({
+                  afterCreateOrganizationUrl: '/settings',
+                })
+              }
+            >
+              <Plus /> New organisation
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
 
 function UserMenu() {
-  const { user, signOut } = useAppState()
+  const { user, signOut, guest, signIn } = useAppState()
   const clerk = useClerk()
+  if (guest) {
+    return (
+      <SidebarMenuButton size="lg" tooltip="Sign in" onClick={signIn}>
+        <CircleUser className="size-5" />
+        <div className="grid flex-1 text-left text-sm leading-tight">
+          <span className="truncate font-medium">Sign in</span>
+          <span className="truncate text-xs text-muted-foreground">Save keys, connect accounts, post</span>
+        </div>
+      </SidebarMenuButton>
+    )
+  }
   if (!user) return null
   const initials = (user.name || user.email)
     .split(/\s+/)
@@ -202,9 +229,7 @@ export function AppSidebar() {
                             <SidebarMenuSubButton asChild isActive={pathname === `${base}/${t.tab}` || (t.tab === 'overview' && pathname === base)}>
                               <NavLink to={`${base}/${t.tab}`}>
                                 <span>{t.label}</span>
-                                {t.tab === 'posts' && count > 0 && (
-                                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span>
-                                )}
+                                {t.tab === 'posts' && count > 0 && <span className="ml-auto text-xs tabular-nums text-muted-foreground">{count}</span>}
                               </NavLink>
                             </SidebarMenuSubButton>
                           </SidebarMenuSubItem>
@@ -222,10 +247,7 @@ export function AppSidebar() {
                     <Plug className="size-3.5" />
                   </span>
                   <span>Grok connector</span>
-                  <StatusDot
-                    on={Boolean(connectors && !connectors.grok.localOnly)}
-                    className="ml-auto group-data-[collapsible=icon]:hidden"
-                  />
+                  <StatusDot on={Boolean(connectors && !connectors.grok.localOnly)} className="ml-auto group-data-[collapsible=icon]:hidden" />
                 </NavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

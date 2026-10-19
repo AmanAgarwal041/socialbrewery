@@ -84,7 +84,11 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal(anon.clerk.publishableKey, clerkEnv.CLERK_PUBLISHABLE_KEY);
     assert.equal(anon.clerk.configured, true);
     assert.equal((await fetch(`${base}/api/posts`)).status, 401);
-    assert.equal((await fetch(`${base}/api/settings`)).status, 401);
+    const guestSettings = await fetch(`${base}/api/settings`).then((res) => res.json());
+    assert.equal(guestSettings.guest, true);
+    assert.equal(guestSettings.managed.find((field) => field.key === 'XAI_API_KEY').set, false);
+    assert.equal(JSON.stringify(guestSettings).includes('xai-secret-value'), false);
+    assert.equal((await fetch(`${base}/api/settings`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{"values":{}}' })).status, 401);
     assert.equal((await fetch(`${base}/api/posts`, as('garbage'))).status, 401);
     assert.equal((await fetch(`${base}/api/posts`, as(sessionToken({ o: { id: 'org_brew', rol: 'admin' }, exp: 1 })))).status, 401);
 
