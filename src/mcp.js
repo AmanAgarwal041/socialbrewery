@@ -392,17 +392,31 @@ export const MCP_TOOLS = [
 ];
 
 // Each organisation has its own connector token; the token alone decides which organisation a call runs in.
+// The same connector serves Grok (grok.com) and Claude (claude.ai, Claude Desktop, Claude Code). The
+// client parameter only labels what each one posts; the token is what grants access.
+export const MCP_CLIENTS = ['grok', 'claude'];
+
 export function connectorDetails() {
   const token = cfg.CONNECTOR_TOKEN || '';
   const origin = publicOrigin();
-  const mcpUrl = `${origin || appUrl()}/mcp?token=${encodeURIComponent(token)}`;
+  const base = `${origin || appUrl()}/mcp?token=${encodeURIComponent(token)}`;
   return {
     name: 'Socialbrewery',
-    mcpUrl,
+    mcpUrl: base,
+    claudeUrl: `${base}&client=claude`,
     localOnly: !origin,
     connectorsPage: 'https://grok.com/connectors',
+    claudePage: 'https://claude.ai/settings/connectors',
   };
 }
+
+export function mcpClientFrom(url) {
+  const client = url?.searchParams?.get('client');
+  return MCP_CLIENTS.includes(client) ? client : 'grok';
+}
+
+// Newest first. The server answers with the client's version when it knows it.
+const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 export function connectorTokenFrom(req, url) {
   const header = String(req.headers.authorization || '');
@@ -410,13 +424,14 @@ export function connectorTokenFrom(req, url) {
   return bearer || url?.searchParams?.get('token') || '';
 }
 
-export async function handleRpc(message) {
+export async function handleRpc(message, { client = 'grok' } = {}) {
   const id = message?.id ?? null;
   const method = message?.method;
   if (!method) return rpcError(id, -32600, 'Invalid request.');
   if (method === 'initialize') {
+    const requested = message.params?.protocolVersion;
     return rpcResult(id, {
-      protocolVersion: '2025-03-26',
+      protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: 'socialbrewery', version: '0.2.0' },
     });
@@ -426,7 +441,7 @@ export async function handleRpc(message) {
   if (method === 'tools/list') return rpcResult(id, { tools: MCP_TOOLS });
   if (method === 'tools/call') {
     try {
-      const data = await callTool(message.params || {});
+      const data = await callTool(message.params || {}, MCP_CLIENTS.includes(client) ? client : 'grok');
       return rpcResult(id, {
         content: [{ type: 'text', text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) }],
         isError: false,
@@ -442,14 +457,14 @@ export async function handleRpc(message) {
   return rpcError(id, -32601, `Unknown method: ${method}`);
 }
 
-async function callTool(params) {
+async function callTool(params, source) {
   const name = params.name;
   const args = params.arguments || {};
   if (name === 'post_youtube_short') {
-    return postToYouTube({ ...args, source: 'grok' });
+    return postToYouTube({ ...args, source });
   }
   if (name === 'generate_and_post_youtube_short') {
-    return generateAndPost({ ...args, source: 'grok' });
+    return generateAndPost({ ...args, source });
   }
   if (name === 'list_youtube_videos') {
     const limit = Math.min(20, Math.max(1, Number(args.limit) || 10));
@@ -462,7 +477,7 @@ async function callTool(params) {
     return updateVideo(args);
   }
   if (name === 'post_linkedin') {
-    return postToLinkedIn({ ...args, source: 'grok' });
+    return postToLinkedIn({ ...args, source });
   }
   if (name === 'comment_linkedin') {
     return commentOnLinkedIn(args);
@@ -471,16 +486,16 @@ async function callTool(params) {
     return updateLinkedInPost(args);
   }
   if (name === 'generate_and_post_linkedin') {
-    return generateAndPostLinkedIn({ ...args, source: 'grok' });
+    return generateAndPostLinkedIn({ ...args, source });
   }
   if (name === 'post_instagram_reel') {
-    return postToInstagram({ ...args, source: 'grok' });
+    return postToInstagram({ ...args, source });
   }
   if (name === 'generate_and_post_instagram_reel') {
-    return generateAndPostInstagram({ ...args, source: 'grok' });
+    return generateAndPostInstagram({ ...args, source });
   }
   if (name === 'post_x') {
-    return postToX({ ...args, source: 'grok' });
+    return postToX({ ...args, source });
   }
   if (name === 'reply_x') {
     return replyOnX(args);
@@ -489,10 +504,10 @@ async function callTool(params) {
     return deleteXPost(args);
   }
   if (name === 'generate_and_post_x') {
-    return generateAndPostX({ ...args, source: 'grok' });
+    return generateAndPostX({ ...args, source });
   }
   if (name === 'publish_hashnode_article') {
-    return postToHashnode({ ...args, source: 'grok' });
+    return postToHashnode({ ...args, source });
   }
   if (name === 'update_hashnode_article') {
     return updateHashnode(args);
@@ -501,7 +516,7 @@ async function callTool(params) {
     return { articles: await listHashnodePosts(args.limit) };
   }
   if (name === 'post_slack') {
-    return postToSlack({ ...args, source: 'grok' });
+    return postToSlack({ ...args, source });
   }
   if (name === 'reply_slack') {
     return replyOnSlack(args);
@@ -513,7 +528,7 @@ async function callTool(params) {
     return redditRules(args);
   }
   if (name === 'post_reddit') {
-    return postToReddit({ ...args, source: 'grok' });
+    return postToReddit({ ...args, source });
   }
   if (name === 'comment_reddit') {
     return commentOnReddit(args);

@@ -9,7 +9,8 @@ import type { ClerkConfig, Session } from '@/lib/api'
 import { AppStateProvider, useAppState } from '@/lib/app-state'
 import { BrewPage } from '@/pages/brew'
 import { LandingPage } from '@/pages/landing'
-import { ConnectorsPage, GrokConnectorPage } from '@/pages/connectors'
+import { AiConnectorPage, ConnectorsPage } from '@/pages/connectors'
+import { ExtensionPage } from '@/pages/extension'
 import { AuthSplash, ChooseOrgPage, LoginPage, SetupPage } from '@/pages/login'
 import { NetworkPage } from '@/pages/network'
 import { OrganisationPage } from '@/pages/organisation'
@@ -60,7 +61,9 @@ function DashboardRoutes() {
         <Route path="overview" element={<OverviewPage />} />
         <Route path="brew" element={<BrewPage />} />
         <Route path="connectors" element={<ConnectorsPage />} />
-        <Route path="connectors/grok" element={<GrokConnectorPage />} />
+        <Route path="connectors/grok" element={<AiConnectorPage client="grok" />} />
+        <Route path="connectors/claude" element={<AiConnectorPage client="claude" />} />
+        <Route path="extension" element={<ExtensionPage />} />
         <Route path="connectors/:network" element={<NetworkPage />} />
         <Route path="connectors/:network/:tab" element={<NetworkPage />} />
         <Route path="organisation" element={<OrganisationPage />} />

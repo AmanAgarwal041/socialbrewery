@@ -75,7 +75,7 @@ export function OverviewPage() {
   const { health, connectors, posts } = useAppState()
   const connected = NETWORKS.filter((n) => networkState(n.id, health, connectors).connected).length
   const week = posts?.filter((p) => Date.now() - new Date(p.createdAt).getTime() < 7 * 86400000).length ?? 0
-  const byGrok = posts?.filter((p) => ['agent', 'grok', 'connector'].includes(p.source || '')).length ?? 0
+  const byGrok = posts?.filter((p) => ['agent', 'grok', 'claude', 'connector', 'extension'].includes(p.source || '')).length ?? 0
 
   const setup = [
     { done: Boolean(health?.xai), label: 'Add your xAI API key', to: '/settings' },
@@ -97,7 +97,7 @@ export function OverviewPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Total posts" value={posts ? posts.length : <Skeleton className="h-7 w-10" />} icon={Layers} tone="p1" hint="Across every network" />
         <Stat label="This week" value={posts ? week : <Skeleton className="h-7 w-10" />} icon={Send} tone="p3" hint="Last 7 days" />
-        <Stat label="Posted by Grok" value={posts ? byGrok : <Skeleton className="h-7 w-10" />} icon={Sparkles} tone="p2" hint="Brew and grok.com" />
+        <Stat label="Posted by AI" value={posts ? byGrok : <Skeleton className="h-7 w-10" />} icon={Sparkles} tone="p2" hint="Brew, Grok, Claude, extension" />
         <Stat label="Connectors" value={health ? `${connected}/3` : <Skeleton className="h-7 w-10" />} icon={Plug} tone="p4" hint="Networks connected" />
       </div>
 

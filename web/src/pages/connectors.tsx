@@ -50,11 +50,35 @@ const MCP_TOOLS = [
   'delete_reddit_post',
 ]
 
+type AiClient = { id: 'grok' | 'claude'; name: string; where: string; steps: string[]; extra?: { label: string; command: (url: string) => string } }
+
+// The same MCP connector works in both assistants; only the setup steps and the URL's client label differ.
+export const AI_CLIENTS: AiClient[] = [
+  {
+    id: 'grok',
+    name: 'Grok',
+    where: 'Grok on grok.com',
+    steps: ['Open grok.com, then Connectors.', 'Choose New Connector, then Custom.', 'Paste the connector URL above and save.', 'Ask Grok: “Post this to LinkedIn and put the links in the first comment.”'],
+  },
+  {
+    id: 'claude',
+    name: 'Claude',
+    where: 'Claude (claude.ai, Claude Desktop, Claude Code)',
+    steps: [
+      'In claude.ai or Claude Desktop, open Settings, then Connectors.',
+      'Choose Add custom connector, name it Socialbrewery, and paste the connector URL above. Leave the OAuth fields empty.',
+      'In a chat, turn the Socialbrewery connector on from the tools menu.',
+      'Ask Claude: “Post this to LinkedIn and put the links in the first comment.”',
+    ],
+    extra: { label: 'Claude Code', command: (url) => `claude mcp add --transport http socialbrewery "${url}"` },
+  },
+]
+
 export function ConnectorsPage() {
   const { health, connectors } = useAppState()
   return (
     <div>
-      <PageHeader eyebrow="Connectors" title="Connectors" description="Link the networks Socialbrewery posts to, and expose it to Grok on grok.com." icon={Plug} iconClass="bg-palette text-ink" />
+      <PageHeader eyebrow="Connectors" title="Connectors" description="Link the networks Socialbrewery posts to, and let Grok or Claude post through it." icon={Plug} iconClass="bg-palette text-ink" />
       <div className="grid gap-4 md:grid-cols-2">
         {NETWORKS.map((network) => {
           const state = networkState(network.id, health, connectors)
@@ -94,38 +118,43 @@ export function ConnectorsPage() {
             </Card>
           )
         })}
-        <Card className="border-p4 bg-p4-soft/40">
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-2xl bg-p4-soft text-p4-ink">
-                <Plug className="size-5" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <CardTitle>Grok connector</CardTitle>
-                <CardDescription>Let Grok on grok.com post through Socialbrewery.</CardDescription>
+        {AI_CLIENTS.map((client) => (
+          <Card key={client.id} className="border-p4 bg-p4-soft/40">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <span className="flex size-10 items-center justify-center rounded-2xl bg-p4-soft text-p4-ink">
+                  <Plug className="size-5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <CardTitle>{client.name} connector</CardTitle>
+                  <CardDescription>Let {client.where} post through Socialbrewery.</CardDescription>
+                </div>
+                <StatusBadge on={Boolean(connectors && !connectors.grok.localOnly)} loading={!connectors} onLabel="Public" offLabel="Local only" />
               </div>
-              <StatusBadge on={Boolean(connectors && !connectors.grok.localOnly)} loading={!connectors} onLabel="Public" offLabel="Local only" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{MCP_TOOLS.length} tools for posting, editing, and reviewing.</p>
-          </CardContent>
-          <CardFooter>
-            <Button asChild size="sm" variant="ghost" className="ml-auto">
-              <Link to="/connectors/grok">
-                Open <ArrowRight />
-              </Link>
-            </Button>
-          </CardFooter>
-        </Card>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">{MCP_TOOLS.length} tools for posting, editing, and reviewing.</p>
+            </CardContent>
+            <CardFooter>
+              <Button asChild size="sm" variant="ghost" className="ml-auto">
+                <Link to={`/connectors/${client.id}`}>
+                  Open <ArrowRight />
+                </Link>
+              </Button>
+            </CardFooter>
+          </Card>
+        ))}
       </div>
     </div>
   )
 }
 
-export function GrokConnectorPage() {
+export function AiConnectorPage({ client }: { client: AiClient["id"] }) {
   const { connectors, canManage, org, refresh } = useAppState()
   const grok = connectors?.grok
+  const ai = AI_CLIENTS.find((c) => c.id === client) || AI_CLIENTS[0]
+  const url = (client === 'claude' ? grok?.claudeUrl : grok?.mcpUrl) || ''
+  const page = client === 'claude' ? grok?.claudePage || 'https://claude.ai/settings/connectors' : grok?.connectorsPage || 'https://grok.com/connectors'
   const [rotating, setRotating] = useState(false)
 
   async function rotate() {
@@ -133,7 +162,7 @@ export function GrokConnectorPage() {
     try {
       await sendJson<{ grok: Connectors['grok'] }>('/api/org/connector/rotate', 'POST')
       await refresh()
-      toast.success('New connector URL created. Update it in grok.com; the old one stopped working.')
+      toast.success('New connector URLs created. Update them in Grok and Claude; the old ones stopped working.')
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
@@ -144,14 +173,14 @@ export function GrokConnectorPage() {
     <div className="space-y-4">
       <PageHeader
         eyebrow="Connector"
-        title="Grok connector"
-        description="A custom MCP connector so you can ask Grok on grok.com to post, edit, and review for you."
+        title={`${ai.name} connector`}
+        description={`A custom MCP connector so you can ask ${ai.where} to post, edit, and review for you.`}
         icon={Plug}
         iconClass="bg-p4-soft text-p4-ink"
         actions={
           <Button asChild variant="outline">
-            <a href={grok?.connectorsPage || 'https://grok.com/connectors'} target="_blank" rel="noreferrer">
-              grok.com/connectors <ExternalLink />
+            <a href={page} target="_blank" rel="noreferrer">
+              {page.replace(/^https:\/\//, '')} <ExternalLink />
             </a>
           </Button>
         }
@@ -161,7 +190,7 @@ export function GrokConnectorPage() {
           <TriangleAlert />
           <AlertTitle>This URL is still local</AlertTitle>
           <AlertDescription>
-            grok.com cannot reach localhost. Run a tunnel (for example cloudflared), then paste its https origin as the Grok connector public URL in{' '}
+            {ai.name} cannot reach localhost. Run a tunnel (for example cloudflared), then paste its https origin as the Grok connector public URL in{' '}
             <Link to="/settings" className="font-medium underline">
               Settings
             </Link>
@@ -172,16 +201,17 @@ export function GrokConnectorPage() {
       <div className="grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>Connect it in Grok</CardTitle>
+            <CardTitle>Connect it in {ai.name}</CardTitle>
             <CardDescription>
-              The URL carries {org?.name ? `${org.name}'s` : 'your organisation’s'} connector token: anything Grok posts through it uses this organisation's
+              The URL carries {org?.name ? `${org.name}'s` : 'your organisation’s'} connector token: anything {ai.name} posts through it uses this organisation's
               keys and accounts. Treat it like a password.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {canManage ? (
               <div className="space-y-2">
-                <CopyField label="Connector URL" value={grok?.mcpUrl || ''} secret />
+                <CopyField label="Connector URL" value={url} secret />
+                {ai.extra && url && <CopyField label={ai.extra.label} value={ai.extra.command(url)} secret />}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button type="button" variant="outline" size="sm" disabled={rotating}>
@@ -192,7 +222,7 @@ export function GrokConnectorPage() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Rotate the connector token?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        The current URL stops working right away. Paste the new URL into grok.com afterwards.
+                        The current URLs for Grok and Claude stop working right away. Paste the new ones into both afterwards.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -210,12 +240,7 @@ export function GrokConnectorPage() {
               </Alert>
             )}
             <ol className="space-y-3 text-sm">
-              {[
-                'Open grok.com, then Connectors.',
-                'Choose New Connector, then Custom.',
-                'Paste the connector URL above and save.',
-                'Ask Grok: “Post this to LinkedIn and put the links in the first comment.”',
-              ].map((step, index) => (
+              {ai.steps.map((step, index) => (
                 <li key={index} className="flex gap-3">
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-p4-soft text-xs font-semibold text-p4-ink">
                     {index + 1}
@@ -228,7 +253,7 @@ export function GrokConnectorPage() {
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Tools Grok can use</CardTitle>
+            <CardTitle>Tools {ai.name} can use</CardTitle>
             <CardDescription>Every call needs the connector token.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-1.5">

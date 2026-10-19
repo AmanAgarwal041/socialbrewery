@@ -23,7 +23,7 @@ import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
 import { analyzeVideo } from './analysis.js';
-import { connectorDetails, connectorTokenFrom, handleRpc } from './mcp.js';
+import { connectorDetails, connectorTokenFrom, handleRpc, mcpClientFrom } from './mcp.js';
 import {
   beginConnect,
   disconnectYoutube,
@@ -112,6 +112,7 @@ const TYPES = {
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
   '.json': 'application/json; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
 
@@ -456,9 +457,10 @@ async function serveMcp(req, res, url) {
   const messages = Array.isArray(body) ? body : [body];
   const responses = [];
   const ctx = { org: { id: org.id, name: org.name }, config: await loadOrgConfig(org.id), user: null, role: 'member' };
+  const client = mcpClientFrom(url);
   await runWithOrg(ctx, async () => {
     for (const message of messages) {
-      const response = await handleRpc(message);
+      const response = await handleRpc(message, { client });
       if (response) responses.push(response);
     }
   });
@@ -473,6 +475,12 @@ async function serveMcp(req, res, url) {
 async function route(req, res) {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
   const { pathname } = url;
+
+  // MCP clients such as Claude look for OAuth metadata here; the connector uses its token instead.
+  if (pathname.startsWith('/.well-known/')) {
+    sendJson(res, 404, { error: 'Not found.' });
+    return;
+  }
 
   const isApp = !/^\/(api|public|webhooks)\//.test(pathname) && pathname !== '/mcp';
   if (req.method === 'GET' && isApp) {
@@ -623,7 +631,8 @@ async function orgRoute(req, res, url, ctx) {
       slackStatus(),
       redditStatus(),
     ]);
-    const grok = roleAtLeast(currentContext().role, 'admin') ? connectorDetails() : { ...connectorDetails(), mcpUrl: '' };
+    // The URLs carry the organisation's connector token, so only admins see them.
+    const grok = roleAtLeast(currentContext().role, 'admin') ? connectorDetails() : { ...connectorDetails(), mcpUrl: '', claudeUrl: '' };
     sendJson(res, 200, {
       youtube: {
         ...youtube,

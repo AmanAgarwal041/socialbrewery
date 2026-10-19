@@ -112,7 +112,8 @@ export type Connectors = {
     manifest: string
   }
   reddit: { connected: boolean; account: (Profile & { username?: string; karma?: number }) | null; appReady: boolean; redirectUri: string }
-  grok: { name: string; mcpUrl: string; localOnly: boolean; connectorsPage: string }
+  // One MCP connector for both assistants: mcpUrl for Grok, claudeUrl (the same plus client=claude) for Claude.
+  grok: { name: string; mcpUrl: string; claudeUrl: string; localOnly: boolean; connectorsPage: string; claudePage: string }
 }
 
 export type Post = {
@@ -249,7 +250,7 @@ export function guestConnectors(): Connectors {
     hashnode: { connected: false, account: null, appReady: false, redirectUri: '' },
     slack: { connected: false, account: null, appReady: false, redirectUri: '', defaultChannel: '', manifest: '' },
     reddit: { connected: false, account: null, appReady: false, redirectUri: callback('reddit') },
-    grok: { name: 'Socialbrewery', mcpUrl: '', localOnly: false, connectorsPage: 'https://grok.com/connectors' },
+    grok: { name: 'Socialbrewery', mcpUrl: '', claudeUrl: '', localOnly: false, connectorsPage: 'https://grok.com/connectors', claudePage: 'https://claude.ai/settings/connectors' },
   }
 }
 

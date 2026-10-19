@@ -15,7 +15,8 @@
     "tunnel": "cloudflared tunnel --config cloudflare/config.yml run",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
-    "ext:build": "npm --prefix extension install && npm --prefix extension run build"
+    "ext:build": "npm --prefix extension install && npm --prefix extension run build",
+    "ext:package": "npm --prefix extension install && npm --prefix extension run build && node scripts/package-extension.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.150.0"

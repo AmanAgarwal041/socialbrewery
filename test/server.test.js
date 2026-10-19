@@ -140,6 +140,9 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal((await fetch(`${base}/api/posts`, as(memberToken))).status, 200);
     const memberConnectors = await fetch(`${base}/api/connectors`, as(memberToken)).then((res) => res.json());
     assert.equal(memberConnectors.grok.mcpUrl, '');
+    assert.equal(memberConnectors.grok.claudeUrl, '');
+    const adminConnectors = await fetch(`${base}/api/connectors`, as(adminToken)).then((res) => res.json());
+    assert.equal(adminConnectors.grok.claudeUrl, `${adminConnectors.grok.mcpUrl}&client=claude`);
 
     // A Clerk organisation seen for the first time gets its own empty Socialbrewery organisation.
     const fresh = sessionToken({ sub: 'user_new', o: { id: 'org_fresh', rol: 'admin' }, azp: base });
@@ -197,6 +200,16 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal((await rpc('nope')).status, 401);
     const tools = await rpc(connectorToken).then((res) => res.json());
     assert.ok(tools.result.tools.length > 5);
+    // Claude connects to the same endpoint: it negotiates its protocol version, and OAuth discovery is a plain 404.
+    const claudeInit = await fetch(`${base}/mcp?token=${encodeURIComponent(connectorToken)}&client=claude`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '1' } } }),
+    }).then((res) => res.json());
+    assert.equal(claudeInit.result.protocolVersion, '2025-06-18');
+    const wellKnown = await fetch(`${base}/.well-known/oauth-protected-resource`);
+    assert.equal(wellKnown.status, 404);
+    assert.match(wellKnown.headers.get('content-type'), /json/);
 
     const media = await fetch(`${base}/api/media`, as(adminToken, {
       method: 'POST',

@@ -1,6 +1,6 @@
 import { useClerk } from '@clerk/react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Building2, Check, ChevronRight, ChevronsUpDown, CircleUser, LayoutDashboard, LogOut, Plug, Plus, Settings, Sparkles } from 'lucide-react'
+import { Building2, Check, ChevronRight, ChevronsUpDown, CircleUser, LayoutDashboard, LogOut, Plug, Plus, Puzzle, Settings, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { BrewIcon } from '@/components/brand-icons'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -198,6 +198,14 @@ export function AppSidebar() {
               </SidebarMenuButton>
               {!health?.xai && health && <SidebarMenuBadge className="text-destructive">key</SidebarMenuBadge>}
             </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={pathname.startsWith('/extension')} tooltip="Chrome extension">
+                <NavLink to="/extension">
+                  <Puzzle />
+                  <span>Chrome extension</span>
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
 
@@ -247,6 +255,17 @@ export function AppSidebar() {
                     <Plug className="size-3.5" />
                   </span>
                   <span>Grok connector</span>
+                  <StatusDot on={Boolean(connectors && !connectors.grok.localOnly)} className="ml-auto group-data-[collapsible=icon]:hidden" />
+                </NavLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={pathname.startsWith('/connectors/claude')} tooltip="Claude connector">
+                <NavLink to="/connectors/claude">
+                  <span className={cn('flex size-5 items-center justify-center rounded-md', SLOT_CLASSES.p4.chip)}>
+                    <Plug className="size-3.5" />
+                  </span>
+                  <span>Claude connector</span>
                   <StatusDot on={Boolean(connectors && !connectors.grok.localOnly)} className="ml-auto group-data-[collapsible=icon]:hidden" />
                 </NavLink>
               </SidebarMenuButton>
