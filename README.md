@@ -55,9 +55,15 @@
 
 Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its own connector URL, and its token decides whose keys and accounts are used.
 
-1. Sign in as an organisation admin and open **Connectors → Grok connector**.
-2. Copy the connector URL. Treat it like a password; **Rotate token** replaces it at once.
-3. Add it as a custom connector in your agent: on [grok.com/connectors](https://grok.com/connectors) choose **New Connector → Custom**, or add it as a remote MCP server in Claude or another MCP client.
+1. Sign in as an organisation admin and open **Connectors → Grok connector** or **Connectors → Claude connector**.
+2. Copy the connector URL. Treat it like a password; **Rotate token** replaces it at once (for both).
+3. Add it as a custom connector in your agent:
+   - **Grok:** on [grok.com/connectors](https://grok.com/connectors) choose **New Connector → Custom**.
+   - **Claude (claude.ai, Claude Desktop):** Settings → Connectors → **Add custom connector**, paste the Claude URL, leave the OAuth fields empty, then turn it on in a chat's tools menu.
+   - **Claude Code:** `claude mcp add --transport http socialbrewery "<Claude URL>"`.
+   - Any other MCP client: add it as a remote (streamable HTTP) MCP server.
+
+   The Claude URL is the same connector with `client=claude`, so posts are labelled as Claude's in the dashboard.
 4. Ask things like "Post an unlisted Short of rain on a copper kettle", "Post this to LinkedIn", or "How did my latest video do?"
 
 Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
@@ -182,7 +188,8 @@ The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is 
 - **Overview**: post counts, connector status, setup checklist, and a quick prompt into Brew.
 - **Brew**: chat with Grok. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
 - **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.
-- **Connectors → Grok connector**: the URL and tools for grok.com.
+- **Connectors → Grok connector / Claude connector**: the connector URL and tools, with setup steps for grok.com, claude.ai, Claude Desktop, and Claude Code.
+- **Chrome extension**: download the extension (`extension/`, packaged by `npm run ext:package` into `web/public/downloads/`). It posts from the user's own tabs with their own Anthropic or xAI key, asks before anything is published, and signing in only saves runs.
 - **Organisation**: members, roles, invites, and the name (Clerk's organisation profile).
 - **Settings**: this organisation's keys grouped by service (owners and admins), plus Appearance.
 
