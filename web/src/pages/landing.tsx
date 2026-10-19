@@ -12,6 +12,7 @@ import {
   Lock,
   PenLine,
   Plug,
+  Puzzle,
   Send,
   ShieldCheck,
   Sparkles,
@@ -22,7 +23,8 @@ import { Button } from '@/components/ui/button'
 import { NETWORKS, SLOT_CLASSES, type Slot } from '@/lib/networks'
 import { cn } from '@/lib/utils'
 
-// Signed-out visitors land here. "Take a look around" opens the same dashboard in exploring mode.
+// Signed-out visitors land here. "Open the app" opens the same dashboard in exploring mode, with no
+// sign-in; signing in is only needed to save keys, connect networks, and post.
 const EXPLORE = '/overview'
 const REPO = 'https://github.com/AmanAgarwal041/socialbrewery'
 
@@ -134,6 +136,7 @@ export function LandingPage() {
             <a href="#brew" className="hover:text-foreground">Brew</a>
             <a href="#networks" className="hover:text-foreground">Networks</a>
             <a href="#agents" className="hover:text-foreground">For agents</a>
+            <a href="#extension" className="hover:text-foreground">Extension</a>
             <a href="#security" className="hover:text-foreground">Security</a>
           </nav>
           <div className="ml-auto flex items-center gap-2">
@@ -141,7 +144,7 @@ export function LandingPage() {
               <Link to="/login">Sign in</Link>
             </Button>
             <Button asChild size="lg" className="px-3.5">
-              <Link to="/login">Get started</Link>
+              <Link to={EXPLORE}>Open app</Link>
             </Button>
           </div>
         </div>
@@ -151,7 +154,7 @@ export function LandingPage() {
         {/* Hero */}
         <section className="mx-auto max-w-6xl px-4 pt-14 pb-10 text-center md:px-8 md:pt-24">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/70 px-3 py-1 text-xs font-medium text-p1-ink">
-            <Sparkles className="size-3.5" /> A posting studio with a Grok agent
+            <Sparkles className="size-3.5" /> A posting studio for Grok and Claude
           </span>
           <h1 className="mx-auto mt-5 max-w-3xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl md:text-6xl">
             Tell Grok what to make.{' '}
@@ -163,15 +166,23 @@ export function LandingPage() {
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="h-11 w-full px-5 text-base sm:w-auto">
-              <Link to="/login">
-                Get started <ArrowRight data-icon="inline-end" />
+              <Link to={EXPLORE}>
+                Open the app <ArrowRight data-icon="inline-end" />
               </Link>
             </Button>
             <Button asChild variant="outline" size="lg" className="h-11 w-full bg-card/70 px-5 text-base sm:w-auto">
-              <Link to={EXPLORE}>Take a look around</Link>
+              <Link to="/extension">
+                <Puzzle data-icon="inline-start" /> Get the Chrome extension
+              </Link>
             </Button>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">No sign-in needed to look around.</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            No sign-in needed to explore.{' '}
+            <Link to="/login" className="font-medium text-foreground underline underline-offset-2">
+              Sign in
+            </Link>{' '}
+            when you want to save your work and post.
+          </p>
         </section>
 
         <section className="mx-auto max-w-6xl px-4 pb-20 md:px-8">
@@ -298,8 +309,8 @@ export function LandingPage() {
           <div className="grid items-center gap-10 lg:grid-cols-2">
             <div>
               <SectionTitle eyebrow="For agents" title="An MCP connector your agent can post through">
-                Socialbrewery is a custom MCP server. Paste your organisation's connector URL into grok.com, Claude, or any MCP
-                client, then ask it to post, reply, edit, or review.
+                Socialbrewery is a custom MCP server. Paste your organisation's connector URL into grok.com, claude.ai, Claude
+                Desktop, Claude Code, or any MCP client, then ask it to post, reply, edit, or review.
               </SectionTitle>
               <div className="mt-6 overflow-hidden rounded-2xl border border-border/80 bg-ink text-sm text-white/90">
                 <div className="flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5">
@@ -318,12 +329,66 @@ export function LandingPage() {
                 </div>
               </div>
               <ul className="mt-6 space-y-4">
+                <Bullet icon={Bot} slot="p2" title="Grok and Claude, the same way">
+                  One connector, with setup steps for each. Posts are labelled with the assistant that made them.
+                </Bullet>
                 <Bullet icon={Lock} slot="p4" title="One token per organisation">
                   The token picks whose keys and accounts are used. Only admins see it, and Rotate replaces it at once.
                 </Bullet>
               </ul>
             </div>
             <Shot src="/landing/mcp-connector.jpg" alt="The Grok connector page with setup steps and the list of MCP tools." />
+          </div>
+        </section>
+
+        {/* Chrome extension */}
+        <section id="extension" className="scroll-mt-20 border-t border-border/50 bg-card/50 py-20">
+          <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 md:px-8 lg:grid-cols-2">
+            <div>
+              <SectionTitle eyebrow="Chrome extension" title="Post from your own browser, no connections needed">
+                Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in
+                the tabs you’re already signed in to.
+              </SectionTitle>
+              <ul className="mt-6 space-y-4">
+                <Bullet icon={KeyRound} slot="p1" title="No account needed">
+                  Runs on your own Anthropic or xAI key, kept in your browser. Sign in only to save your runs.
+                </Bullet>
+                <Bullet icon={ShieldCheck} slot="p4" title="You approve every post">
+                  It fills everything in, then waits with a screenshot before it clicks Post, Share, Publish, or Send.
+                </Bullet>
+              </ul>
+              <Button asChild size="lg" className="mt-7 h-11 px-5 text-base">
+                <Link to="/extension">
+                  <Puzzle data-icon="inline-start" /> Get the extension
+                </Link>
+              </Button>
+            </div>
+            <div className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_24px_60px_-28px_color-mix(in_oklab,var(--p1)_60%,transparent)]" aria-hidden>
+              <div className="flex items-center gap-2 border-b border-border/60 pb-3 text-sm font-semibold">
+                <span className="bg-palette flex size-7 items-center justify-center rounded-lg text-ink">
+                  <BrewIcon className="size-4" />
+                </span>
+                Socialbrewery
+                <span className="ml-auto rounded-md bg-p1 px-2 py-0.5 text-xs text-ink">Claude</span>
+                <span className="rounded-md px-2 py-0.5 text-xs text-muted-foreground">Grok</span>
+              </div>
+              <div className="space-y-2.5 pt-4 text-sm">
+                <p className="ml-10 rounded-xl bg-p1-soft px-3 py-2">Write a LinkedIn post about our launch and post it.</p>
+                <p className="mr-6 rounded-xl border border-border px-3 py-2">Here’s the draft. Filling it in on LinkedIn now.</p>
+                <p className="text-xs text-muted-foreground">• Open https://www.linkedin.com/feed/</p>
+                <p className="text-xs text-muted-foreground">• Click “Start a post” · Type the draft</p>
+                <div className="rounded-xl border-2 border-p1 p-3">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    <ShieldCheck className="size-4" /> Ready to publish on linkedin.com
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">The agent wants to click “Post”.</p>
+                  <div className="mt-2.5 flex gap-2">
+                    <span className="flex-1 rounded-lg bg-p1 py-1.5 text-center text-xs font-medium text-ink">Approve</span>
+                    <span className="flex-1 rounded-lg border border-border py-1.5 text-center text-xs font-medium">Don’t publish</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -382,15 +447,17 @@ export function LandingPage() {
         <section className="mx-auto max-w-6xl px-4 pb-20 md:px-8">
           <div className="bg-palette rounded-3xl px-6 py-12 text-center text-ink sm:px-12">
             <h2 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">Start brewing</h2>
-            <p className="mx-auto mt-3 max-w-xl text-ink/75">Sign in, create an organisation, add your xAI key, and connect a network.</p>
+            <p className="mx-auto mt-3 max-w-xl text-ink/75">
+              Open the app and look around first. When you’re ready, sign in, add your xAI key, and connect a network.
+            </p>
             <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-11 w-full bg-ink px-5 text-base text-white hover:bg-ink/85 sm:w-auto">
-                <Link to="/login">
-                  Get started <ArrowRight data-icon="inline-end" />
+                <Link to={EXPLORE}>
+                  Open the app <ArrowRight data-icon="inline-end" />
                 </Link>
               </Button>
               <Button asChild variant="outline" size="lg" className="h-11 w-full border-ink/20 bg-white/60 px-5 text-base sm:w-auto">
-                <Link to={EXPLORE}>Take a look around</Link>
+                <Link to="/login">Sign in</Link>
               </Button>
             </div>
           </div>
@@ -401,7 +468,8 @@ export function LandingPage() {
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center md:px-8">
           <Logo />
           <nav className="flex flex-wrap gap-x-5 gap-y-2 sm:ml-auto">
-            <Link to={EXPLORE} className="hover:text-foreground">Explore</Link>
+            <Link to={EXPLORE} className="hover:text-foreground">Open app</Link>
+            <Link to="/extension" className="hover:text-foreground">Chrome extension</Link>
             <Link to="/login" className="hover:text-foreground">Sign in</Link>
             <a href={REPO} target="_blank" rel="noreferrer" className="hover:text-foreground">GitHub</a>
             <a href="https://metainfo.agarwal-aman041.workers.dev" target="_blank" rel="noreferrer" className="hover:text-foreground">MetaInfo</a>
