@@ -1,6 +1,6 @@
 import { useClerk } from '@clerk/react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { Building2, Check, ChevronRight, ChevronsUpDown, CircleUser, LayoutDashboard, LogOut, Plug, Plus, Puzzle, Settings, Sparkles } from 'lucide-react'
+import { Building2, Check, ChevronRight, ChevronsUpDown, CircleUser, LayoutDashboard, LogOut, Mail, Plug, Plus, Puzzle, Settings, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { BrewIcon } from '@/components/brand-icons'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -199,6 +199,14 @@ export function AppSidebar() {
                 </NavLink>
               </SidebarMenuButton>
               {!assistant.ready && health && <SidebarMenuBadge className="text-destructive">key</SidebarMenuBadge>}
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={pathname.startsWith('/email')} tooltip="Email">
+                <NavLink to="/email">
+                  <Mail />
+                  <span>Email</span>
+                </NavLink>
+              </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={pathname.startsWith('/extension')} tooltip="Chrome extension">

@@ -196,6 +196,38 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     const strangerExt = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: 'chrome-extension://someoneelse' });
     assert.equal((await fromExtension({ runs: [run] }, strangerExt, 'chrome-extension://someoneelse')).status, 403);
 
+    // Email: members add leads and draft; importing and sending are for admins. Every email's
+    // unsubscribe link works without signing in, including mail apps' one-click POST.
+    const memberLead = await fetch(`${base}/api/email/leads`, as(memberToken, { method: 'POST', body: JSON.stringify({ email: 'Lead@Example.com', firstName: 'Lee' }) }));
+    assert.equal(memberLead.status, 201);
+    const leadId = (await memberLead.json()).lead.id;
+    assert.equal((await fetch(`${base}/api/email/leads/import`, as(memberToken, { method: 'POST', body: JSON.stringify({ csv: 'email\nx@y.com', consent: true }) }))).status, 403);
+    const imported = await fetch(`${base}/api/email/leads/import`, as(adminToken, { method: 'POST', body: JSON.stringify({ csv: 'email,name\nx@y.com,Xi Yu', consent: true }) })).then((res) => res.json());
+    assert.equal(imported.added, 1);
+    const draftCampaign = await fetch(`${base}/api/email/campaigns`, as(memberToken, { method: 'POST', body: JSON.stringify({ subject: 'Hi', body: 'Hello' }) })).then((res) => res.json());
+    assert.equal((await fetch(`${base}/api/email/campaigns/${draftCampaign.campaign.id}/send`, as(memberToken, { method: 'POST', body: '{}' }))).status, 403);
+    const notReady = await fetch(`${base}/api/email/campaigns/${draftCampaign.campaign.id}/send`, as(adminToken, { method: 'POST', body: '{}' }));
+    assert.equal(notReady.status, 400);
+    assert.match((await notReady.json()).error, /Resend API key/);
+    const emailState = await fetch(`${base}/api/email/status`, as(adminToken)).then((res) => res.json());
+    assert.equal(emailState.counts.total, 2);
+    assert.equal(emailState.webhookUrl, `${base}/webhooks/resend/${org.id}`);
+    assert.equal((await fetch(`${base}/api/email/status`, as(memberToken)).then((res) => res.json())).webhookUrl, '');
+    const noKeyDraft = await fetch(`${base}/api/email/draft`, as(adminToken, { method: 'POST', body: JSON.stringify({ brief: 'launch', provider: 'claude' }) }));
+    assert.equal(noKeyDraft.status, 400);
+
+    const { sign } = await import('../src/secure.js');
+    const unsubUrl = `${base}/public/unsubscribe/${org.id}/${leadId}?sig=${sign(`unsub:${org.id}:${leadId}`)}`;
+    const confirm = await fetch(unsubUrl);
+    assert.equal(confirm.status, 200);
+    assert.match(await confirm.text(), /Unsubscribe from Brewery\?/);
+    assert.equal((await fetch(unsubUrl.replace(/sig=.*/, 'sig=forged'))).status, 404);
+    const oneClick = await fetch(unsubUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'List-Unsubscribe=One-Click' });
+    assert.match(await oneClick.text(), /You’re unsubscribed/);
+    const leadsAfter = await fetch(`${base}/api/email/leads`, as(adminToken)).then((res) => res.json());
+    assert.equal(leadsAfter.leads.find((l) => l.id === leadId).status, 'unsubscribed');
+    assert.equal((await fetch(`${base}/webhooks/resend/${org.id}`, { method: 'POST', body: '{}' })).status, 401);
+
     // Connecting a network: the callback can arrive after the Clerk token expired, so the connect step
     // leaves a signed ticket for that organisation. Without it, a callback is not signed in.
     const connect = await fetch(`${base}/api/youtube/connect`, { headers: { Cookie: `__session=${adminToken}` }, redirect: 'manual' });

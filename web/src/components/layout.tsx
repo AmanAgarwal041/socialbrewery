@@ -34,6 +34,10 @@ function crumbs(pathname: string): { label: string; to?: string }[] {
   if (parts[0] === 'settings') return [{ label: 'Settings' }]
   if (parts[0] === 'organisation') return [{ label: 'Organisation' }]
   if (parts[0] === 'extension') return [{ label: 'Chrome extension' }]
+  if (parts[0] === 'email') {
+    if (parts[1] !== 'campaigns') return [{ label: 'Email' }, { label: 'Leads' }]
+    return parts[2] ? [{ label: 'Email', to: '/email' }, { label: 'Campaigns', to: '/email/campaigns' }, { label: 'Campaign' }] : [{ label: 'Email', to: '/email' }, { label: 'Campaigns' }]
+  }
   if (parts[0] === 'connectors') {
     if (!parts[1]) return [{ label: 'Connectors' }]
     if (parts[1] === 'grok') return [{ label: 'Connectors', to: '/connectors' }, { label: 'Grok connector' }]

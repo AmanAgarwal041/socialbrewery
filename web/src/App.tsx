@@ -11,6 +11,7 @@ import { BrewPage } from '@/pages/brew'
 import { LandingPage } from '@/pages/landing'
 import { AiConnectorPage, ConnectorsPage } from '@/pages/connectors'
 import { ExtensionPage } from '@/pages/extension'
+import { EmailCampaignPage, EmailCampaignsPage, EmailLeadsPage } from '@/pages/email'
 import { AuthSplash, ChooseOrgPage, LoginPage, SetupPage } from '@/pages/login'
 import { NetworkPage } from '@/pages/network'
 import { OrganisationPage } from '@/pages/organisation'
@@ -64,6 +65,9 @@ function DashboardRoutes() {
         <Route path="connectors/grok" element={<AiConnectorPage client="grok" />} />
         <Route path="connectors/claude" element={<AiConnectorPage client="claude" />} />
         <Route path="extension" element={<ExtensionPage />} />
+        <Route path="email" element={<EmailLeadsPage />} />
+        <Route path="email/campaigns" element={<EmailCampaignsPage />} />
+        <Route path="email/campaigns/:id" element={<EmailCampaignPage />} />
         <Route path="connectors/:network" element={<NetworkPage />} />
         <Route path="connectors/:network/:tab" element={<NetworkPage />} />
         <Route path="organisation" element={<OrganisationPage />} />

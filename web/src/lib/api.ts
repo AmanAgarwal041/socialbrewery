@@ -121,6 +121,44 @@ export type Connectors = {
   grok: { name: string; mcpUrl: string; claudeUrl: string; localOnly: boolean; connectorsPage: string; claudePage: string }
 }
 
+export type LeadStatus = 'subscribed' | 'unsubscribed' | 'bounced'
+export type Lead = {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  company: string
+  tags: string[]
+  status: LeadStatus
+  source: 'csv' | 'manual'
+  createdAt: string
+  updatedAt: string
+  lastEmailedAt: string
+}
+export type Campaign = {
+  id: string
+  name: string
+  subject: string
+  body: string
+  audienceTags: string[]
+  status: 'draft' | 'sending' | 'paused' | 'sent'
+  createdAt: string
+  updatedAt: string
+  sentAt: string
+  stats: { sent: number; failed: number }
+}
+export type EmailStatus = {
+  ready: boolean
+  missing: string[]
+  publicLinks: boolean
+  from: string
+  counts: { total: number; subscribed: number }
+  webhookSet: boolean
+  webhookUrl: string
+}
+export type ImportResult = { added: number; updated: number; total: number; skipped: { line: number; reason: string }[] }
+export type SendResult = { status: Campaign['status']; sentNow: number; failedNow: number; remaining: number; stats: Campaign['stats'] }
+
 export type Post = {
   id: string
   network?: NetworkId
@@ -222,6 +260,17 @@ const GUEST_READS: Record<string, unknown> = {
   '/api/slack/channels': { channels: [] },
   '/api/instagram/events': { events: [] },
   '/api/posts': { posts: [] },
+  '/api/email/leads': { leads: [] },
+  '/api/email/campaigns': { campaigns: [] },
+  '/api/email/status': {
+    ready: false,
+    missing: ['Resend API key', 'From address', 'Postal address'],
+    publicLinks: true,
+    from: '',
+    counts: { total: 0, subscribed: 0 },
+    webhookSet: false,
+    webhookUrl: '',
+  },
 }
 
 export function agentLabel(health?: Health | null) {

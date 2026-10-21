@@ -16,7 +16,32 @@ import {
 } from './accounts.js';
 import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken } from './clerk.js';
 import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
-import { cfg, currentContext, runWithOrg } from './context.js';
+import { cfg, currentContext, publicOrigin, runWithOrg } from './context.js';
+import { claudeChat } from './claude.js';
+import { grokChat } from './grok.js';
+import {
+  DRAFT_SYSTEM,
+  addLead,
+  applyResendEvent,
+  campaignDetails,
+  deleteCampaign,
+  deleteLeads,
+  emailStatus,
+  importLeads,
+  isEmailId,
+  listCampaigns,
+  listLeads,
+  parseDraft,
+  retryFailed,
+  saveCampaign,
+  sendCampaignChunk,
+  sendTest,
+  unsubscribeLead,
+  unsubscribePage,
+  updateLead,
+  verifyResendWebhook,
+  verifyUnsubscribe,
+} from './email.js';
 import { sign, verifySignature } from './secure.js';
 import { AGENT_PROVIDERS, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
 import { publicDir } from './paths.js';
@@ -523,6 +548,43 @@ async function route(req, res) {
     return;
   }
 
+  // Unsubscribe links in every email: GET asks to confirm, POST unsubscribes. Mail apps' one-click
+  // unsubscribe (RFC 8058) POSTs to the same signed URL.
+  const unsub = pathname.match(/^\/public\/unsubscribe\/([a-f0-9]{24})\/([a-f0-9]{16})$/);
+  if (unsub && (req.method === 'GET' || req.method === 'POST')) {
+    const [, orgId, leadId] = unsub;
+    const org = verifyUnsubscribe(orgId, leadId, url.searchParams.get('sig')) ? await getOrg(orgId) : null;
+    if (!org) throw fail('That unsubscribe link is not valid.', 404);
+    if (req.method === 'POST') {
+      await readBody(req, 10_000).catch(() => null);
+      await runWithOrg(await orgContext(org, 'member', null), () => unsubscribeLead(leadId));
+    }
+    const html = unsubscribePage({ orgName: org.name, done: req.method === 'POST', action: `${pathname}${url.search}` });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    res.end(html);
+    return;
+  }
+
+  // Resend reports bounces and spam complaints here, signed with the organisation's webhook secret.
+  const resendHook = pathname.match(/^\/webhooks\/resend\/([a-f0-9]{24})$/);
+  if (resendHook) {
+    if (req.method !== 'POST') throw fail('Method not allowed.', 405);
+    const org = await getOrg(resendHook[1]);
+    if (!org) throw fail('Not found.', 404);
+    const ctx = await orgContext(org, 'member', null);
+    const raw = (await readBody(req, 1_000_000)).toString('utf8');
+    if (!verifyResendWebhook(req.headers, raw, ctx.config.RESEND_WEBHOOK_SECRET)) throw fail('Bad signature.', 401);
+    let event;
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      throw fail('That request was not valid JSON.');
+    }
+    const updated = await runWithOrg(ctx, () => applyResendEvent(event));
+    sendJson(res, 200, { ok: true, updated });
+    return;
+  }
+
   const unsafe = req.method !== 'GET' && req.method !== 'HEAD';
   if (unsafe && pathname.startsWith('/api/') && !sameOrigin(req)) {
     throw fail('Cross-site request refused.', 403);
@@ -610,6 +672,11 @@ async function orgRoute(req, res, url, ctx) {
   // Members, roles, invites, and the organisation's name are managed in Clerk.
   if (req.method === 'GET' && pathname === '/api/org') {
     sendJson(res, 200, { org: ctx.org, role: ctx.role });
+    return;
+  }
+
+  if (pathname.startsWith('/api/email/')) {
+    await emailRoute(req, res, pathname, ctx);
     return;
   }
 
@@ -1243,6 +1310,83 @@ function listen(server, host, port) {
     };
     tryListen(0);
   });
+}
+
+// Leads and campaigns. Members can add leads and draft campaigns; importing a list, deleting, and
+// sending are for admins, because they mail many people in the organisation's name.
+async function emailRoute(req, res, pathname, ctx) {
+  const admin = () => requireRole(ctx, 'admin');
+  const lead = pathname.match(/^\/api\/email\/leads\/([a-f0-9]{16})$/);
+  const campaign = pathname.match(/^\/api\/email\/campaigns\/([a-f0-9]{16})(?:\/(send|retry|test))?$/);
+
+  if (req.method === 'GET' && pathname === '/api/email/status') {
+    const leads = await listLeads();
+    const counts = { total: leads.length, subscribed: leads.filter((l) => l.status === 'subscribed').length };
+    const canManage = roleAtLeast(ctx.role, 'admin');
+    sendJson(res, 200, {
+      ...emailStatus(),
+      counts,
+      webhookSet: Boolean(cfg.RESEND_WEBHOOK_SECRET),
+      webhookUrl: canManage ? `${publicOrigin() || appUrl()}/webhooks/resend/${ctx.org.id}` : '',
+    });
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/email/leads') return sendJson(res, 200, { leads: await listLeads() });
+  if (req.method === 'POST' && pathname === '/api/email/leads') return sendJson(res, 201, { lead: await addLead(await readJsonBody(req)) });
+  if (req.method === 'POST' && pathname === '/api/email/leads/import') {
+    admin();
+    return sendJson(res, 200, await importLeads(await readJsonBody(req)));
+  }
+  if (req.method === 'POST' && pathname === '/api/email/leads/delete') {
+    admin();
+    const body = await readJsonBody(req);
+    await deleteLeads((Array.isArray(body.ids) ? body.ids : []).filter(isEmailId));
+    return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === 'PATCH' && lead) return sendJson(res, 200, { lead: await updateLead(lead[1], await readJsonBody(req)) });
+
+  if (req.method === 'GET' && pathname === '/api/email/campaigns') return sendJson(res, 200, { campaigns: await listCampaigns() });
+  if (req.method === 'POST' && pathname === '/api/email/campaigns') return sendJson(res, 201, { campaign: await saveCampaign('', await readJsonBody(req)) });
+  if (campaign && !campaign[2]) {
+    if (req.method === 'GET') return sendJson(res, 200, await campaignDetails(campaign[1]));
+    if (req.method === 'PATCH') return sendJson(res, 200, { campaign: await saveCampaign(campaign[1], await readJsonBody(req)) });
+    if (req.method === 'DELETE') {
+      admin();
+      await deleteCampaign(campaign[1]);
+      return sendJson(res, 200, { ok: true });
+    }
+  }
+  if (req.method === 'POST' && campaign?.[2] === 'send') {
+    admin();
+    return sendJson(res, 200, await sendCampaignChunk(campaign[1]));
+  }
+  if (req.method === 'POST' && campaign?.[2] === 'retry') {
+    admin();
+    return sendJson(res, 200, await retryFailed(campaign[1]));
+  }
+  if (req.method === 'POST' && campaign?.[2] === 'test') {
+    admin();
+    const body = await readJsonBody(req);
+    return sendJson(res, 200, await sendTest(campaign[1], body.to));
+  }
+
+  // A first draft from Grok or Claude, from a short brief.
+  if (req.method === 'POST' && pathname === '/api/email/draft') {
+    const body = await readJsonBody(req);
+    const brief = String(body.brief || '').trim().slice(0, 4000);
+    if (!brief) throw fail('Describe what the email is about.');
+    const provider = agentProvider(body.provider);
+    if (provider === 'claude' && !cfg.ANTHROPIC_API_KEY) throw fail('Add your Anthropic API key in Settings to draft with Claude.');
+    if (provider === 'grok' && !cfg.XAI_API_KEY) throw fail('Add your xAI API key in Settings to draft with Grok.');
+    const messages = [
+      { role: 'system', content: DRAFT_SYSTEM },
+      { role: 'user', content: `Organisation: ${ctx.org.name}\nBrief: ${brief}` },
+    ];
+    const reply = provider === 'claude' ? await claudeChat({ messages }) : await grokChat({ messages });
+    return sendJson(res, 200, { ...parseDraft(reply.content), provider, by: agentName(provider) });
+  }
+
+  sendJson(res, 404, { error: 'Not found.' });
 }
 
 export async function handleRequest(req, res) {

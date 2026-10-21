@@ -152,6 +152,36 @@ export const ORG_FIELDS = [
     help: 'The secret of the same Reddit web app.',
   },
   {
+    key: 'RESEND_API_KEY',
+    label: 'Resend API key',
+    secret: true,
+    help: 'From resend.com → API Keys. Emails to your leads are sent through your Resend account.',
+  },
+  {
+    key: 'EMAIL_FROM',
+    label: 'From address',
+    secret: false,
+    help: 'For example: Ada at Acme <hello@acme.com>. The domain must be verified in Resend.',
+  },
+  {
+    key: 'EMAIL_REPLY_TO',
+    label: 'Reply-to address',
+    secret: false,
+    help: 'Optional. Where replies go, if not the from address.',
+  },
+  {
+    key: 'EMAIL_POSTAL_ADDRESS',
+    label: 'Postal address',
+    secret: false,
+    help: 'Required by anti-spam laws (CAN-SPAM, CASL). Shown at the bottom of every email.',
+  },
+  {
+    key: 'RESEND_WEBHOOK_SECRET',
+    label: 'Resend webhook secret',
+    secret: true,
+    help: 'Optional, recommended. whsec_… from the webhook you add in Resend, so bounces and spam complaints stop future emails.',
+  },
+  {
     key: 'MCP_PUBLIC_URL',
     label: 'Grok connector public URL',
     secret: false,
@@ -213,6 +243,11 @@ export function orgDefaults() {
     SLACK_DEFAULT_CHANNEL: '',
     REDDIT_CLIENT_ID: '',
     REDDIT_CLIENT_SECRET: '',
+    RESEND_API_KEY: '',
+    EMAIL_FROM: '',
+    EMAIL_REPLY_TO: '',
+    EMAIL_POSTAL_ADDRESS: '',
+    RESEND_WEBHOOK_SECRET: '',
     MCP_PUBLIC_URL: '',
     CONNECTOR_TOKEN: '',
   };
@@ -345,6 +380,13 @@ export function normalizeOrgSettings(input, current = {}, clear = []) {
   const provider = String(values.ANALYSIS_PROVIDER || 'grok').toLowerCase();
   if (!['grok', 'claude', 'openai'].includes(provider)) errors.push('Analysis provider must be grok, claude, or openai.');
   else values.ANALYSIS_PROVIDER = provider;
+  if (values.EMAIL_FROM) {
+    const match = /^\s*(?:"?([^"<]*)"?\s*<([^>]+)>|([^\s<>]+))\s*$/.exec(values.EMAIL_FROM);
+    const address = String(match?.[2] || match?.[3] || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(address)) errors.push('From address must look like Name <hello@yourdomain.com>.');
+  }
+  if (values.EMAIL_REPLY_TO && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.EMAIL_REPLY_TO.trim())) errors.push('Reply-to must be an email address.');
+  if (values.RESEND_WEBHOOK_SECRET && !/^whsec_[A-Za-z0-9+/=]+$/.test(values.RESEND_WEBHOOK_SECRET.trim())) errors.push('The Resend webhook secret starts with whsec_.');
   const agent = String(values.AGENT_PROVIDER || 'grok').toLowerCase();
   if (!['grok', 'claude'].includes(agent)) errors.push('Assistant must be grok or claude.');
   else values.AGENT_PROVIDER = agent;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentType, type FormEvent, type SVGProps } from 'react'
-import { Bot, Eye, EyeOff, Loader2, Lock, Palette as PaletteIcon, Plug, RotateCcw, Save, Settings as SettingsIcon, X } from 'lucide-react'
+import { Bot, Eye, EyeOff, Loader2, Lock, Mail, Palette as PaletteIcon, Plug, RotateCcw, Save, Settings as SettingsIcon, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { HashnodeIcon, InstagramIcon, LinkedinIcon, RedditIcon, SlackIcon, XIcon, YoutubeIcon } from '@/components/brand-icons'
 import { PageHeader } from '@/components/common'
@@ -33,6 +33,14 @@ const GROUPS: Group[] = [
   { id: 'hashnode', title: 'Hashnode', description: 'Personal access token. API access needs the blog on Hashnode Pro.', icon: HashnodeIcon, tone: 'bg-p1-soft text-p1-ink', keys: ['HASHNODE_TOKEN', 'HASHNODE_PUBLICATION'] },
   { id: 'slack', title: 'Slack', description: 'Bot token from your Slack app, after Install to Workspace.', icon: SlackIcon, tone: 'bg-p2-soft text-p2-ink', keys: ['SLACK_BOT_TOKEN', 'SLACK_DEFAULT_CHANNEL'] },
   { id: 'reddit', title: 'Reddit', description: 'Web app credentials from reddit.com/prefs/apps.', icon: RedditIcon, tone: 'bg-p3-soft text-p3-ink', keys: ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET'] },
+  {
+    id: 'email',
+    title: 'Email',
+    description: 'Send to your leads through your Resend account. Every email includes your postal address and an unsubscribe link.',
+    icon: Mail,
+    tone: 'bg-p3-soft text-p3-ink',
+    keys: ['RESEND_API_KEY', 'EMAIL_FROM', 'EMAIL_REPLY_TO', 'EMAIL_POSTAL_ADDRESS', 'RESEND_WEBHOOK_SECRET'],
+  },
   { id: 'grok', title: 'Grok connector', description: 'Public tunnel URL for grok.com and Instagram. Rotate the connector token on the Grok connector page.', icon: Plug, tone: 'bg-p4-soft text-p4-ink', keys: ['MCP_PUBLIC_URL'] },
 ]
 
@@ -261,7 +269,7 @@ export function SettingsPage() {
             const fields = group.keys.map((k) => byKey.get(k)).filter(Boolean) as SettingField[]
             if (!fields.length) return null
             return (
-              <Card key={group.id} className={cn(group.id === 'ai' && 'md:col-span-2')}>
+              <Card key={group.id} id={group.id} className={cn('scroll-mt-20', (group.id === 'ai' || group.id === 'email') && 'md:col-span-2')}>
                 <CardHeader>
                   <div className="flex items-start gap-3">
                     <span className={cn('flex size-9 items-center justify-center rounded-xl', group.tone)}>
@@ -273,7 +281,7 @@ export function SettingsPage() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className={cn('grid gap-4', group.id === 'ai' && 'md:grid-cols-2')}>
+                <CardContent className={cn('grid gap-4', (group.id === 'ai' || group.id === 'email') && 'md:grid-cols-2')}>
                   {fields.map((field) => (
                     <Field
                       key={field.key}

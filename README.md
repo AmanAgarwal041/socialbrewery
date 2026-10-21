@@ -68,6 +68,17 @@ Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its o
 
 Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
 
+## Email your leads
+
+**Email** in the sidebar keeps a list of leads and sends campaigns to them through your own [Resend](https://resend.com) account.
+
+1. In Resend, verify your sending domain and create an API key. In **Settings → Email**, add the key, your **From address** (`Name <hello@yourdomain.com>`), and your **postal address**.
+2. Optional, recommended: in Resend → Webhooks, add the webhook URL shown on the Email page with the events `email.bounced`, `email.complained`, and `email.suppressed`, and paste its signing secret (`whsec_…`) into Settings, so bounced and complaining addresses are never mailed again.
+3. **Leads:** import a CSV (it needs an `email` column; `name`, `first name`, `last name`, `company`, and `tags` are picked up too), or add people one by one. Importing asks you to confirm everyone agreed to hear from you.
+4. **Campaigns:** write the subject and body (or ask Grok or Claude for a draft), personalise with `{{first_name|there}}`, `{{company}}`, `{{email}}`, pick tags or everyone, send yourself a test, then send.
+
+Built-in safeguards: every email carries your postal address, an unsubscribe link, and one-click `List-Unsubscribe` headers; anyone who unsubscribes, bounces, or complains is on a suppression list that survives deleting and re-importing them; each address gets a campaign once (batches carry idempotency keys); and campaigns can't be edited once they start sending. Importing, deleting, and sending are for organisation admins. Unsubscribe links need a public `APP_URL`.
+
 ## Part of a product family
 
 - [MetaInfo](https://metainfo.agarwal-aman041.workers.dev): SEO and AI-search visibility audits.
