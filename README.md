@@ -68,6 +68,21 @@ Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its o
 
 Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
 
+
+## Video Studio (make videos from Claude or Grok)
+
+The connector also carries a Video Studio: brand kits, a style guide, motion styles (cinematic, graph to 3D pillars,
+prompt-motion effects, product launch, brag-style storytelling, pastel explainer), agent playbooks, HyperFrames + GSAP
+templates, ElevenLabs or Kokoro voiceovers, and an MP4 renderer that drops the video into the media library for the
+posting tools. Full guide: [docs/video-studio.md](docs/video-studio.md).
+
+1. Connect the connector as above. In **Claude Desktop / claude.ai** add the Claude URL as a custom connector; in
+   **Claude Code** run `claude mcp add --transport http socialbrewery "<Claude URL>"`; in **Grok** add the Grok URL on grok.com/connectors.
+2. Optional: add an **ElevenLabs API key** in Settings for voiceovers. Rendering needs `ffmpeg` and Node 22+ on the server.
+3. Ask, for example: *"Use the Socialbrewery video studio, playbook launch-video, style cinematic, brand openlit. Make a
+   30 s vertical Short about <PR link> from these screenshots, render it, and show me before posting."*
+   In Claude you can also pick the `make_launch_video` prompt and browse `studio://` resources from the attachment menu.
+
 ## Email your leads
 
 **Email** in the sidebar keeps a list of leads and sends campaigns to them through your own [Resend](https://resend.com) account.
