@@ -68,6 +68,12 @@ export const ORG_FIELDS = [
     help: 'Default gpt-5.6-terra. Change this to a chat model from your OpenAI account if a review fails.',
   },
   {
+    key: 'ELEVENLABS_API_KEY',
+    label: 'ElevenLabs API key',
+    secret: true,
+    help: 'From elevenlabs.io. Video Studio uses it for voiceovers (generate_voiceover); without it, a local Kokoro install is used if present.',
+  },
+  {
     key: 'YOUTUBE_CLIENT_ID',
     label: 'YouTube client ID',
     secret: false,
@@ -229,6 +235,7 @@ export function orgDefaults() {
     ANALYSIS_PROVIDER: 'grok',
     OPENAI_API_KEY: '',
     OPENAI_MODEL: 'gpt-5.6-terra',
+    ELEVENLABS_API_KEY: '',
     YOUTUBE_CLIENT_ID: '',
     YOUTUBE_CLIENT_SECRET: '',
     LINKEDIN_CLIENT_ID: '',

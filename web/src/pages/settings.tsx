@@ -24,7 +24,7 @@ const GROUPS: Group[] = [
     description: 'Grok or Claude runs Brew and writes drafts. Clips are generated with Grok. Reviews can use Grok, Claude, or OpenAI.',
     icon: Bot,
     tone: 'bg-p1-soft text-p1-ink',
-    keys: ['AGENT_PROVIDER', 'XAI_API_KEY', 'XAI_MODEL', 'XAI_VIDEO_MODEL', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'ANALYSIS_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL'],
+    keys: ['AGENT_PROVIDER', 'XAI_API_KEY', 'XAI_MODEL', 'XAI_VIDEO_MODEL', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'ANALYSIS_PROVIDER', 'OPENAI_API_KEY', 'OPENAI_MODEL', 'ELEVENLABS_API_KEY'],
   },
   { id: 'youtube', title: 'YouTube', description: 'OAuth client from Google Cloud.', icon: YoutubeIcon, tone: 'bg-p1-soft text-p1-ink', keys: ['YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET'] },
   { id: 'linkedin', title: 'LinkedIn', description: 'App credentials from LinkedIn Developers.', icon: LinkedinIcon, tone: 'bg-p3-soft text-p3-ink', keys: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'] },

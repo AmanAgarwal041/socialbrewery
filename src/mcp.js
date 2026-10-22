@@ -25,6 +25,22 @@ import { listHashnodePosts, updateHashnode } from './hashnode.js';
 import { listSlackChannels } from './slack.js';
 import { deleteReddit, listRedditSubreddits } from './reddit.js';
 import { cfg, publicOrigin } from './context.js';
+import {
+  addStudioAsset,
+  createVideoProject,
+  EFFECTS,
+  generateVoiceover,
+  getRenderStatus,
+  getVideoPlaybook,
+  getVideoProject,
+  listStudioDocs,
+  listVideoStyles,
+  readStudioDoc,
+  renderVideo,
+  saveBrandKit,
+  TEMPLATES,
+  updateVideoProject,
+} from './studio.js';
 
 const HASHNODE_ARTICLE = {
   title: { type: 'string', description: 'Article title, at least 6 characters.' },
@@ -392,6 +408,165 @@ export const MCP_TOOLS = [
 ];
 
 // Each organisation has its own connector token; the token alone decides which organisation a call runs in.
+const STUDIO_SCENE = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kicker: { type: 'string', description: 'Small mono label above the headline.' },
+    headline: { type: 'string', description: 'On-screen headline, max about 8 words. No em dashes.' },
+    highlight: { type: 'string', description: 'One word of the headline to color with the accent.' },
+    sub: { type: 'string' },
+    image: { type: 'string', description: 'REAL screenshot: https URL, data:image URI, or assets/<file> from add_studio_asset.' },
+    label: { type: 'string', description: 'Corner label, e.g. "STYLIZED TRANSITION" for anything illustrative.' },
+    focus: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, scale: { type: 'number' } }, description: 'Zoom target in % of the screenshot and the zoom scale.' },
+    effect: { type: 'string', enum: EFFECTS, description: 'Entry effect. zoom-through/shutter also style the exit of the previous scene. endcard shows loader, CTA, and question.' },
+    pillars: { type: 'array', items: { type: 'number' }, description: 'For effect "pillars": measured bar heights from the real chart.' },
+    captions: { type: 'array', items: { type: 'object', properties: { at: { type: 'number' }, text: { type: 'string' } } }, description: 'Burned-in caption chunks, seconds from scene start.' },
+    duration: { type: 'number', description: 'Seconds. Match the voiceover line length.' },
+  },
+};
+
+const STUDIO_PROJECT = {
+  title: { type: 'string' },
+  template: { type: 'string', enum: Object.keys(TEMPLATES) },
+  formats: { type: 'array', items: { type: 'string', enum: ['9x16', '16x9'] }, description: 'Cuts to build. Default from the template.' },
+  style: { type: 'string', description: 'Motion style id from list_video_styles (for the record and the playbook).' },
+  brand: { description: 'Brand kit id (e.g. "default", "openlit", or one saved with save_brand_kit) or an inline brand object.' },
+  scenes: { type: 'array', items: STUDIO_SCENE },
+  cta: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } } },
+  question: { type: 'string', description: 'Open-ended question for the end card.' },
+  voiceoverId: { type: 'string', description: 'From generate_voiceover.' },
+};
+
+export const STUDIO_TOOLS = [
+  {
+    name: 'list_video_styles',
+    description: 'Video Studio: list motion styles, playbooks, templates, scene effects, brand kits, and guides. Start here before making a launch video, Short, or promo.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'get_video_playbook',
+    description: 'Video Studio: get a step-by-step playbook plus the style guide, copy rules, voice rules, an optional motion style, and the brand kit, as one Markdown document. Follow it.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        playbook: { type: 'string', description: 'launch-video, product-short, or explainer-promo. Default launch-video.' },
+        style: { type: 'string', description: 'Motion style id, e.g. cinematic, graph-to-3d-pillars, prompt-motion, product-launch, brag-storytelling, pastel-explainer.' },
+        brand: { type: 'string', description: 'Brand kit id. Default "default".' },
+      },
+    },
+  },
+  {
+    name: 'list_studio_docs',
+    description: 'Video Studio: list every document in the knowledge pack (guides, motion styles, playbooks, templates, brand kits, vendored brag and cinetic skills) with studio:// URIs.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'get_studio_doc',
+    description: 'Video Studio: read one knowledge-pack document by path or studio:// URI, e.g. vendor/cinetic/references/camera.md.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { path: { type: 'string' } }, required: ['path'] },
+  },
+  {
+    name: 'save_brand_kit',
+    description: 'Video Studio: save a brand kit for this organisation (colors as hex, fonts, logo URL, voice, CTA, keywords). Use the id later as brand.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' }, name: { type: 'string' }, tagline: { type: 'string' }, logoUrl: { type: 'string' }, website: { type: 'string' },
+        colors: { type: 'object', description: 'bg, ink, muted, accent, button, buttonText, card.' },
+        fonts: { type: 'object', description: 'sans and mono font family names (Inter and Geist Mono are bundled).' },
+        voice: { type: 'object', description: 'elevenlabsVoiceId, model, speed, kokoroVoice.' },
+        cta: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } } },
+        keywords: { type: 'array', items: { type: 'string' } },
+        notes: { type: 'string' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'add_studio_asset',
+    description: 'Video Studio: store a real screenshot or clip for scenes (base64 or a public https URL). Returns image: "assets/<name>" to use in a scene.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { name: { type: 'string', description: 'File name ending in .png, .jpg, .webp, .gif, .svg, .mp4, or .webm.' }, base64: { type: 'string' }, url: { type: 'string' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'generate_voiceover',
+    description: 'Video Studio: narrate text with ElevenLabs (org key in Settings, brand voice by default) or local Kokoro as a fallback, sped up (default from the brand, 1.25x for OpenLIT). Returns voiceoverId and duration.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        text: { type: 'string' },
+        brand: { type: 'string' },
+        voiceId: { type: 'string' },
+        model: { type: 'string', description: 'Default eleven_multilingual_v2.' },
+        speed: { type: 'number', description: '0.5 to 2. Applied with ffmpeg atempo.' },
+        provider: { type: 'string', enum: ['elevenlabs', 'kokoro'] },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'create_video_project',
+    description: 'Video Studio: build a HyperFrames + GSAP composition from scenes, a brand kit, CTA, question, and voiceover. Returns projectId. Show the plan to the user before rendering.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: STUDIO_PROJECT, required: ['scenes'] },
+  },
+  {
+    name: 'update_video_project',
+    description: 'Video Studio: change any field of a project (scenes, brand, formats, CTA, question, voiceover) and rebuild it.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { projectId: { type: 'string' }, ...STUDIO_PROJECT }, required: ['projectId'] },
+  },
+  {
+    name: 'get_video_project',
+    description: 'Video Studio: read a project, including the generated composition HTML per format.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { projectId: { type: 'string' }, includeHtml: { type: 'boolean' } }, required: ['projectId'] },
+  },
+  {
+    name: 'render_video',
+    description: 'Video Studio: render a project cut to MP4 with HyperFrames (headless Chrome), master audio to -14 LUFS, and add it to the media library. Starts a job; poll get_render_status. The result mediaId works with post_youtube_short, post_slack, post_x, post_instagram_reel, post_linkedin.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { projectId: { type: 'string' }, format: { type: 'string', enum: ['9x16', '16x9'] }, quality: { type: 'string', enum: ['standard', 'delivery'] } },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'get_render_status',
+    description: 'Video Studio: check a render job. When status is done it has mediaId.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: { jobId: { type: 'string' } }, required: ['jobId'] },
+  },
+];
+
+// The connector lists the Video Studio tools after the posting tools.
+MCP_TOOLS.push(...STUDIO_TOOLS);
+
+export const MCP_PROMPTS = [
+  { name: 'make_launch_video', description: 'Make a launch video from a PR, changelog, or docs page with the Video Studio.', arguments: [{ name: 'source', description: 'PR, docs, or changelog URL', required: true }, { name: 'brand', description: 'Brand kit id' }, { name: 'style', description: 'Motion style id' }], playbook: 'launch-video' },
+  { name: 'make_product_short', description: 'Make a vertical product Short on real screenshots with the Video Studio.', arguments: [{ name: 'topic', description: 'What the Short is about', required: true }, { name: 'brand', description: 'Brand kit id' }, { name: 'style', description: 'Motion style id' }], playbook: 'product-short' },
+  { name: 'make_explainer_promo', description: 'Make an explainer promo that lands on the product.', arguments: [{ name: 'topic', description: 'Concept to explain', required: true }, { name: 'brand', description: 'Brand kit id' }, { name: 'style', description: 'Motion style id' }], playbook: 'explainer-promo' },
+];
+
+async function getPrompt(params) {
+  const prompt = MCP_PROMPTS.find((p) => p.name === params?.name);
+  if (!prompt) throw new Error(`Unknown prompt: ${params?.name || 'missing'}`);
+  const args = params.arguments || {};
+  const pack = await getVideoPlaybook({ playbook: prompt.playbook, style: args.style || undefined, brand: args.brand || undefined });
+  const subject = args.source || args.topic || '';
+  return {
+    description: prompt.description,
+    messages: [{
+      role: 'user',
+      content: { type: 'text', text: `${prompt.description}\nSubject: ${subject}\nBrand kit (JSON): ${JSON.stringify(pack.brand)}\n\nFollow this playbook and these rules. Draft first and ask before posting anything.\n\n${pack.text}` },
+    }],
+  };
+}
+
 // The same connector serves Grok (grok.com) and Claude (claude.ai, Claude Desktop, Claude Code). The
 // client parameter only labels what each one posts; the token is what grants access.
 export const MCP_CLIENTS = ['grok', 'claude'];
@@ -432,13 +607,36 @@ export async function handleRpc(message, { client = 'grok' } = {}) {
     const requested = message.params?.protocolVersion;
     return rpcResult(id, {
       protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, prompts: { listChanged: false } },
       serverInfo: { name: 'socialbrewery', version: '0.2.0' },
     });
   }
   if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null;
   if (method === 'ping') return rpcResult(id, {});
   if (method === 'tools/list') return rpcResult(id, { tools: MCP_TOOLS });
+  if (method === 'resources/list') {
+    return rpcResult(id, { resources: listStudioDocs().map(({ uri, path, title, summary, mimeType }) => ({ uri, name: path, title: title || path, description: summary || undefined, mimeType })) });
+  }
+  if (method === 'resources/templates/list') return rpcResult(id, { resourceTemplates: [] });
+  if (method === 'resources/read') {
+    try {
+      const doc = readStudioDoc(message.params?.uri);
+      const mimeType = doc.path.endsWith('.json') ? 'application/json' : doc.path.endsWith('.html') ? 'text/html' : 'text/markdown';
+      return rpcResult(id, { contents: [{ uri: doc.uri, mimeType, text: doc.text }] });
+    } catch (err) {
+      return rpcError(id, -32002, err.message);
+    }
+  }
+  if (method === 'prompts/list') {
+    return rpcResult(id, { prompts: MCP_PROMPTS.map(({ name, description, arguments: args }) => ({ name, description, arguments: args })) });
+  }
+  if (method === 'prompts/get') {
+    try {
+      return rpcResult(id, await getPrompt(message.params));
+    } catch (err) {
+      return rpcError(id, -32602, err.message);
+    }
+  }
   if (method === 'tools/call') {
     try {
       const data = await callTool(message.params || {}, MCP_CLIENTS.includes(client) ? client : 'grok');
@@ -539,6 +737,18 @@ async function callTool(params, source) {
   if (name === 'delete_reddit_post') {
     return deleteReddit(args.post);
   }
+  if (name === 'list_video_styles') return listVideoStyles();
+  if (name === 'get_video_playbook') return getVideoPlaybook(args);
+  if (name === 'list_studio_docs') return { docs: listStudioDocs() };
+  if (name === 'get_studio_doc') return readStudioDoc(args.path).text;
+  if (name === 'save_brand_kit') return saveBrandKit(args);
+  if (name === 'add_studio_asset') return addStudioAsset(args);
+  if (name === 'generate_voiceover') return generateVoiceover(args);
+  if (name === 'create_video_project') return createVideoProject(args);
+  if (name === 'update_video_project') return updateVideoProject(args);
+  if (name === 'get_video_project') return getVideoProject(args);
+  if (name === 'render_video') return renderVideo(args);
+  if (name === 'get_render_status') return getRenderStatus(args);
   throw new Error(`Unknown tool: ${name || 'missing'}`);
 }
 
