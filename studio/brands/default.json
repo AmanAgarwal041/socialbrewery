@@ -1,0 +1,11 @@
+{
+  "id": "default",
+  "name": "Your brand",
+  "colors": { "bg": "#0C0A09", "ink": "#F5F5F4", "muted": "#A8A29E", "accent": "#2563EB", "button": "#2563EB", "buttonText": "#FFFFFF", "card": "#1C1917" },
+  "fonts": { "sans": "Inter", "mono": "Geist Mono" },
+  "logoUrl": "",
+  "website": "https://example.com",
+  "voice": { "elevenlabsVoiceId": "", "model": "eleven_multilingual_v2", "speed": 1.25, "kokoroVoice": "am_michael" },
+  "keywords": [],
+  "cta": { "label": "Learn more", "url": "https://example.com" }
+}

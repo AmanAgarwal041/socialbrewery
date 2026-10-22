@@ -1,0 +1,14 @@
+{
+  "id": "openlit",
+  "name": "OpenLIT",
+  "tagline": "Open source, OpenTelemetry-native LLM observability",
+  "colors": { "bg": "#0C0A09", "ink": "#FAFAF9", "muted": "#A8A29E", "accent": "#F36C06", "button": "#C2410C", "buttonText": "#FFFFFF", "card": "#1C1917" },
+  "fonts": { "sans": "Inter", "mono": "Geist Mono" },
+  "logoUrl": "https://github.com/openlit.png",
+  "website": "https://openlit.io",
+  "github": "https://github.com/openlit/openlit",
+  "voice": { "elevenlabsVoiceId": "4IRPuRJvf53MmuBPNKJI", "model": "eleven_multilingual_v2", "speed": 1.25, "kokoroVoice": "am_michael" },
+  "keywords": ["LLM observability", "OpenTelemetry", "AI agent tracing", "LLM cost tracking", "GPU monitoring", "prompt management", "open source"],
+  "cta": { "label": "Book a call with the founder", "url": "https://cal.com/aman.openlit/30min" },
+  "notes": "Buttons are #C2410C with white text. Use real screenshots from the openlit main branch. End with an open question."
+}
