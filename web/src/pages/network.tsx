@@ -291,7 +291,7 @@ function NetworkConnection({ network }: { network: NetworkMeta }) {
 
           <div className={cn('flex flex-wrap gap-2', !canManage && 'hidden')}>
             {!state.ready ? (
-              <Button onClick={() => navigate('/settings')} variant={network.id === 'reddit' ? 'outline' : 'default'}>
+              <Button onClick={() => navigate(`/settings#${network.id}`)} variant={network.id === 'reddit' ? 'outline' : 'default'}>
                 <KeyRound /> {network.id === 'reddit' ? 'Add approved keys (optional)' : 'Add keys in Settings'}
               </Button>
             ) : (
