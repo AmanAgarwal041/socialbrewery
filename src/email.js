@@ -4,8 +4,10 @@ import { appUrl } from './env.js';
 import { cfg, currentContext, orgDataDir } from './context.js';
 import { readJson, updateJson } from './store.js';
 import { safeEqual, sha256, sign, verifySignature } from './secure.js';
+import { connectSmtp, validateSmtp } from './smtp.js';
+import { onWorkers } from './storage.js';
 
-// Leads and email campaigns, sent with the organisation's own Resend account.
+// Leads and email campaigns, sent with the organisation's own Resend account or SMTP server.
 //
 // Safeguards are built in, not optional: every email carries a one-click unsubscribe link (and the
 // List-Unsubscribe headers), the organisation's postal address, and is never sent to an address on
@@ -51,10 +53,33 @@ const text = (value, max) => String(value ?? '').trim().slice(0, max);
 
 // ---------- settings ----------
 
+export function emailProvider() {
+  return String(cfg.EMAIL_PROVIDER || 'resend').toLowerCase() === 'smtp' ? 'smtp' : 'resend';
+}
+
+function smtpOptions() {
+  return {
+    host: String(cfg.SMTP_HOST || '').trim(),
+    port: Number(cfg.SMTP_PORT) || (cfg.SMTP_SECURITY === 'tls' ? 465 : 587),
+    security: String(cfg.SMTP_SECURITY || 'starttls').toLowerCase(),
+    username: cfg.SMTP_USERNAME || '',
+    password: cfg.SMTP_PASSWORD || '',
+    fromName: cfg.SMTP_FROM_NAME || '',
+    fromEmail: cfg.SMTP_FROM_EMAIL || '',
+    replyTo: cfg.EMAIL_REPLY_TO || '',
+  };
+}
+
 export function emailStatus() {
+  const provider = emailProvider();
   const missing = [];
-  if (!cfg.RESEND_API_KEY) missing.push('Resend API key');
-  if (!cfg.EMAIL_FROM) missing.push('From address');
+  if (provider === 'smtp') {
+    if (!cfg.SMTP_HOST) missing.push('SMTP host');
+    if (!cfg.SMTP_FROM_EMAIL) missing.push('SMTP from email');
+  } else {
+    if (!cfg.RESEND_API_KEY) missing.push('Resend API key');
+    if (!cfg.EMAIL_FROM) missing.push('From address');
+  }
   if (!cfg.EMAIL_POSTAL_ADDRESS) missing.push('Postal address');
   let publicLinks = true;
   try {
@@ -63,7 +88,8 @@ export function emailStatus() {
   } catch {
     publicLinks = false;
   }
-  return { ready: missing.length === 0, missing, publicLinks, from: cfg.EMAIL_FROM || '' };
+  const from = provider === 'smtp' ? (cfg.SMTP_FROM_EMAIL ? (cfg.SMTP_FROM_NAME ? `${cfg.SMTP_FROM_NAME} <${cfg.SMTP_FROM_EMAIL}>` : cfg.SMTP_FROM_EMAIL) : '') : cfg.EMAIL_FROM || '';
+  return { ready: missing.length === 0, missing, publicLinks, from, provider };
 }
 
 // ---------- suppression ----------
@@ -416,6 +442,112 @@ async function resend(pathname, body, idempotencyKey) {
   throw fail('Resend is rate limiting or unavailable. Try again in a minute.', 503);
 }
 
+// ---------- transports ----------
+// Both providers take the same rendered messages, so merge fields, unsubscribe links and headers,
+// suppression, chunking, and the send log are identical whichever one an organisation picks.
+
+let smtpConnector = connectSmtp;
+/** For tests: replace the SMTP connection factory. */
+export function setSmtpConnector(fn) {
+  smtpConnector = fn || connectSmtp;
+}
+
+function smtpMessage(msg) {
+  return { to: msg.to[0], subject: msg.subject, html: msg.html, text: msg.text, headers: msg.headers, replyTo: msg.reply_to };
+}
+
+async function openSmtp() {
+  if (onWorkers()) {
+    throw fail('SMTP sending needs the Node server: Cloudflare Workers cannot open SMTP connections reliably (port 25 is blocked and STARTTLS is not supported). Use Resend on the Cloudflare deploy, or run Socialbrewery with npm start.', 400);
+  }
+  const options = smtpOptions();
+  const problems = validateSmtp(options);
+  if (problems.length) throw fail(problems[0]);
+  try {
+    return await smtpConnector(options);
+  } catch (err) {
+    throw fail(err.message, err.permanent ? 400 : 502);
+  }
+}
+
+/** Sends one message through the chosen provider. */
+async function deliverOne(msg) {
+  if (emailProvider() === 'resend') return resend('/emails', msg);
+  const session = await openSmtp();
+  try {
+    return await session.send(smtpMessage(msg));
+  } catch (err) {
+    throw fail(err.message, err.permanent ? 400 : 502);
+  } finally {
+    await session.close();
+  }
+}
+
+/** Sends a batch; returns one result per message: { id } or { error }. Throws when nothing can go. */
+async function deliverBatch(messages, idempotencyKey) {
+  if (emailProvider() === 'resend') {
+    const data = await resend('/emails/batch', messages, idempotencyKey);
+    return messages.map((_, j) => ({ id: data.data?.[j]?.id || '' }));
+  }
+  const session = await openSmtp();
+  const out = [];
+  try {
+    for (const msg of messages) {
+      try {
+        out.push({ id: (await session.send(smtpMessage(msg))).id || '' });
+      } catch (err) {
+        // A lost connection fails the rest of the batch; a refused address only fails that one.
+        if (!err.code) {
+          while (out.length < messages.length) out.push({ error: err.message });
+          break;
+        }
+        out.push({ error: err.message });
+      }
+    }
+  } finally {
+    await session.close();
+  }
+  return out;
+}
+
+/** Connects (and for SMTP, signs in) without sending, for Settings → Email → Verify connection. */
+export async function verifyEmailConnection() {
+  const provider = emailProvider();
+  if (provider === 'smtp') {
+    const session = await openSmtp();
+    await session.close();
+    return { ok: true, provider, message: `Connected to ${cfg.SMTP_HOST} and signed in.` };
+  }
+  if (!cfg.RESEND_API_KEY) throw fail('Add your Resend API key first.');
+  const res = await fetch(`${RESEND}/domains`, { headers: { Authorization: `Bearer ${cfg.RESEND_API_KEY}`, 'User-Agent': 'socialbrewery' } });
+  if (res.status === 401 || res.status === 403) {
+    // Sending-only keys can't list domains but are still valid.
+    const data = await res.json().catch(() => ({}));
+    if (/restricted/i.test(data.message || data.name || '')) return { ok: true, provider, message: 'Resend accepted the key (sending only).' };
+    throw fail('Resend rejected the API key.');
+  }
+  if (!res.ok) throw fail(`Resend returned ${res.status}.`, 502);
+  return { ok: true, provider, message: 'Resend accepted the API key.' };
+}
+
+/** Sends a plain test email to check the settings, without needing a campaign. */
+export async function sendSettingsTest(to) {
+  const status = emailStatus();
+  if (!status.ready) throw fail(`Add your ${status.missing.join(', ')} first.`);
+  const email = normalizeEmail(to);
+  if (!email) throw fail('Enter the address to send the test to.');
+  const text = `This is a test from Socialbrewery. Your ${status.provider === 'smtp' ? 'SMTP server' : 'Resend account'} is set up to send to your leads.\n\n${cfg.EMAIL_POSTAL_ADDRESS}`;
+  const data = await deliverOne({
+    from: cfg.EMAIL_FROM,
+    to: [email],
+    subject: 'Socialbrewery test email',
+    text,
+    html: `<p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>`,
+    ...(cfg.EMAIL_REPLY_TO ? { reply_to: cfg.EMAIL_REPLY_TO } : {}),
+  });
+  return { id: data.id || '', to: email, provider: status.provider };
+}
+
 function message(campaign, lead) {
   const email = renderEmail(campaign, lead);
   return {
@@ -448,7 +580,7 @@ export async function sendTest(id, to) {
   const lead = (await listLeads()).find((l) => l.status === 'subscribed') || { firstName: 'Alex', lastName: 'Sample', company: 'Example Co' };
   const sample = { ...lead, id: '0'.repeat(16), email };
   const payload = { ...message(campaign, sample), subject: `[Test] ${merge(campaign.subject, sample)}` };
-  const data = await resend('/emails', payload);
+  const data = await deliverOne(payload);
   return { id: data.id || '', to: email };
 }
 
@@ -471,11 +603,14 @@ export async function sendCampaignChunk(id) {
     const batch = chunk.slice(i, i + BATCH);
     const key = `sb-${id}-${sha256(batch.map((l) => l.email).join(',')).slice(0, 32)}`;
     try {
-      const data = await resend('/emails/batch', batch.map((lead) => message(campaign, lead)), key);
-      batch.forEach((lead, j) => (results[lead.email] = { s: 'sent', id: data.data?.[j]?.id || '', at: now() }));
+      const sent = await deliverBatch(batch.map((lead) => message(campaign, lead)), key);
+      batch.forEach((lead, j) => {
+        const r = sent[j] || { error: 'Not sent.' };
+        results[lead.email] = r.error ? { s: 'failed', e: r.error, at: now() } : { s: 'sent', id: r.id || '', at: now() };
+      });
     } catch (err) {
       // A bad key or unverified domain fails every batch the same way: stop and say so.
-      if (err.status === 400 && /api key|domain|from|verify/i.test(err.message)) {
+      if (err.status === 400 && /api key|domain|from|verify|smtp|password|cloudflare/i.test(err.message)) {
         await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id ? { ...c, status: 'paused' } : c)));
         throw err;
       }

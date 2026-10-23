@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { envFile } from './paths.js';
+import { validateSmtp } from './smtp.js';
 
 // Server-wide settings: they live in .env and only the operator of the server changes them.
 export const SYSTEM_FIELDS = [
@@ -158,6 +159,12 @@ export const ORG_FIELDS = [
     help: 'The secret of the same Reddit web app.',
   },
   {
+    key: 'EMAIL_PROVIDER',
+    label: 'Email provider',
+    secret: false,
+    help: 'How emails to your leads are sent: resend (Resend API) or smtp (your own mail server, e.g. Google Workspace, Microsoft 365, Postmark, SES, Mailgun).',
+  },
+  {
     key: 'RESEND_API_KEY',
     label: 'Resend API key',
     secret: true,
@@ -186,6 +193,48 @@ export const ORG_FIELDS = [
     label: 'Resend webhook secret',
     secret: true,
     help: 'Optional, recommended. whsec_… from the webhook you add in Resend, so bounces and spam complaints stop future emails.',
+  },
+  {
+    key: 'SMTP_HOST',
+    label: 'SMTP host',
+    secret: false,
+    help: 'Your mail server, for example smtp.gmail.com or email-smtp.us-east-1.amazonaws.com.',
+  },
+  {
+    key: 'SMTP_PORT',
+    label: 'SMTP port',
+    secret: false,
+    help: 'Usually 465 for TLS/SSL or 587 for STARTTLS.',
+  },
+  {
+    key: 'SMTP_SECURITY',
+    label: 'SMTP security',
+    secret: false,
+    help: 'tls (SSL from the first byte, port 465) or starttls (upgrade after connecting, port 587).',
+  },
+  {
+    key: 'SMTP_USERNAME',
+    label: 'SMTP username',
+    secret: false,
+    help: 'Usually your full email address or the SMTP user from your provider.',
+  },
+  {
+    key: 'SMTP_PASSWORD',
+    label: 'SMTP password',
+    secret: true,
+    help: 'The SMTP password or an app password (Gmail and Microsoft 365 need an app password with 2-step sign-in).',
+  },
+  {
+    key: 'SMTP_FROM_NAME',
+    label: 'SMTP from name',
+    secret: false,
+    help: 'Name people see, for example Ada at Acme.',
+  },
+  {
+    key: 'SMTP_FROM_EMAIL',
+    label: 'SMTP from email',
+    secret: false,
+    help: 'Address the emails come from. Your server must be allowed to send as it.',
   },
   {
     key: 'MCP_PUBLIC_URL',
@@ -250,11 +299,19 @@ export function orgDefaults() {
     SLACK_DEFAULT_CHANNEL: '',
     REDDIT_CLIENT_ID: '',
     REDDIT_CLIENT_SECRET: '',
+    EMAIL_PROVIDER: 'resend',
     RESEND_API_KEY: '',
     EMAIL_FROM: '',
     EMAIL_REPLY_TO: '',
     EMAIL_POSTAL_ADDRESS: '',
     RESEND_WEBHOOK_SECRET: '',
+    SMTP_HOST: '',
+    SMTP_PORT: '587',
+    SMTP_SECURITY: 'starttls',
+    SMTP_USERNAME: '',
+    SMTP_PASSWORD: '',
+    SMTP_FROM_NAME: '',
+    SMTP_FROM_EMAIL: '',
     MCP_PUBLIC_URL: '',
     CONNECTOR_TOKEN: '',
   };
@@ -394,6 +451,24 @@ export function normalizeOrgSettings(input, current = {}, clear = []) {
   }
   if (values.EMAIL_REPLY_TO && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.EMAIL_REPLY_TO.trim())) errors.push('Reply-to must be an email address.');
   if (values.RESEND_WEBHOOK_SECRET && !/^whsec_[A-Za-z0-9+/=]+$/.test(values.RESEND_WEBHOOK_SECRET.trim())) errors.push('The Resend webhook secret starts with whsec_.');
+  const mailer = String(values.EMAIL_PROVIDER || 'resend').toLowerCase();
+  if (!['resend', 'smtp'].includes(mailer)) errors.push('Email provider must be resend or smtp.');
+  else values.EMAIL_PROVIDER = mailer;
+  values.SMTP_SECURITY = String(values.SMTP_SECURITY || 'starttls').toLowerCase();
+  if (!values.SMTP_PORT) values.SMTP_PORT = values.SMTP_SECURITY === 'tls' ? '465' : '587';
+  if (values.SMTP_FROM_EMAIL && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(values.SMTP_FROM_EMAIL)) errors.push('SMTP from email must be an email address.');
+  // Check the server details once SMTP is chosen or any of them is filled in.
+  if (mailer === 'smtp' || values.SMTP_HOST) {
+    errors.push(
+      ...validateSmtp({
+        host: values.SMTP_HOST,
+        port: values.SMTP_PORT,
+        security: values.SMTP_SECURITY,
+        username: values.SMTP_USERNAME,
+        password: values.SMTP_PASSWORD,
+      }).filter((e) => mailer === 'smtp' || !/host is required/.test(e)),
+    );
+  }
   const agent = String(values.AGENT_PROVIDER || 'grok').toLowerCase();
   if (!['grok', 'claude'].includes(agent)) errors.push('Assistant must be grok or claude.');
   else values.AGENT_PROVIDER = agent;

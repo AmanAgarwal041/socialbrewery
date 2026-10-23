@@ -27,6 +27,8 @@ import {
   deleteCampaign,
   deleteLeads,
   emailStatus,
+  sendSettingsTest,
+  verifyEmailConnection,
   importLeads,
   isEmailId,
   listCampaigns,
@@ -1330,6 +1332,15 @@ async function emailRoute(req, res, pathname, ctx) {
       webhookUrl: canManage ? `${publicOrigin() || appUrl()}/webhooks/resend/${ctx.org.id}` : '',
     });
     return;
+  }
+  if (req.method === 'POST' && pathname === '/api/email/verify') {
+    admin();
+    return sendJson(res, 200, await verifyEmailConnection());
+  }
+  if (req.method === 'POST' && pathname === '/api/email/test') {
+    admin();
+    const body = await readJsonBody(req);
+    return sendJson(res, 200, await sendSettingsTest(body.to));
   }
   if (req.method === 'GET' && pathname === '/api/email/leads') return sendJson(res, 200, { leads: await listLeads() });
   if (req.method === 'POST' && pathname === '/api/email/leads') return sendJson(res, 201, { lead: await addLead(await readJsonBody(req)) });
