@@ -196,3 +196,124 @@ test('Resend stays the default provider', async () => {
     assert.equal(email.emailStatus().ready, true);
   });
 });
+
+// ---------- Workers transport (cloudflare:sockets), mocked ----------
+
+function fakeWorkersServer({ authLines = 'AUTH PLAIN LOGIN' } = {}) {
+  const log = { lines: [], connects: [], tlsUpgraded: false, closed: 0, data: '' };
+  function makeSocket(secure) {
+    let controller;
+    let inData = false;
+    let buf = '';
+    const send = (t) => controller.enqueue(new TextEncoder().encode(t));
+    const readable = new ReadableStream({
+      start(c) {
+        controller = c;
+        if (!log.tlsUpgraded) send('220 fake ESMTP\r\n');
+      },
+    });
+    const writable = new WritableStream({
+      write(chunk) {
+        buf += new TextDecoder().decode(chunk);
+        let i;
+        while ((i = buf.indexOf('\r\n')) >= 0) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          if (inData) {
+            if (line === '.') {
+              inData = false;
+              send('250 OK queued as W1\r\n');
+            } else log.data += `${line}\n`;
+            continue;
+          }
+          log.lines.push(`${secure ? 'tls' : 'plain'}:${line}`);
+          if (/^EHLO/.test(line)) send(secure ? `250-fake\r\n250 ${authLines}\r\n` : '250-fake\r\n250 STARTTLS\r\n');
+          else if (line === 'STARTTLS') send('220 go ahead\r\n');
+          else if (/^AUTH PLAIN/.test(line)) send('235 ok\r\n');
+          else if (/^(MAIL|RCPT|RSET)/.test(line)) send('250 ok\r\n');
+          else if (line === 'DATA') {
+            inData = true;
+            send('354 go\r\n');
+          } else if (line === 'QUIT') send('221 bye\r\n');
+        }
+      },
+    });
+    return {
+      readable,
+      writable,
+      opened: Promise.resolve({}),
+      startTls() {
+        assert.equal(secure, false, 'startTls only on the plain socket');
+        log.tlsUpgraded = true;
+        return makeSocket(true);
+      },
+      async close() {
+        log.closed++;
+      },
+    };
+  }
+  const loader = async (mod) => {
+    assert.equal(mod, 'cloudflare:sockets', 'Workers must not load node:net or node:tls');
+    return {
+      connect(address, opts) {
+        log.connects.push({ address, opts });
+        return makeSocket(opts.secureTransport === 'on');
+      },
+    };
+  };
+  return { log, loader };
+}
+
+test('transport selection: Workers use cloudflare:sockets (on / starttls), Node uses node:net and node:tls', async () => {
+  const { log, loader } = fakeWorkersServer();
+  const t1 = await smtp.openTransport({ host: 'smtp.acme.com', port: 465, security: 'tls' }, { workers: true, loader });
+  await t1.close();
+  const t2 = await smtp.openTransport({ host: 'smtp.acme.com', port: 587, security: 'starttls' }, { workers: true, loader });
+  await t2.close();
+  assert.deepEqual(log.connects.map((c) => [c.address.hostname, c.address.port, c.opts.secureTransport]), [
+    ['smtp.acme.com', 465, 'on'],
+    ['smtp.acme.com', 587, 'starttls'],
+  ]);
+  await assert.rejects(smtp.openTransport({ host: 'smtp.acme.com', port: 25, security: 'starttls' }, { workers: true, loader }), /port 25/);
+  assert.ok(smtp.validateSmtp({ host: 'smtp.acme.com', port: 25, security: 'starttls', workers: true }).some((e) => /port 25/.test(e)));
+  assert.deepEqual(smtp.validateSmtp({ host: 'smtp.acme.com', port: 25, security: 'starttls', workers: false }), []);
+
+  const loaded = [];
+  await assert.rejects(
+    smtp.openTransport({ host: '127.0.0.1', port: 1, security: 'none' }, { workers: false, loader: async (m) => (loaded.push(m), import(m)) }),
+    /Could not reach/,
+  );
+  assert.deepEqual(loaded.sort(), ['node:net', 'node:tls']);
+});
+
+test('Workers STARTTLS path: EHLO, STARTTLS, startTls(), EHLO again, AUTH and send over TLS, then close', async () => {
+  const { log, loader } = fakeWorkersServer();
+  smtp.setSmtpTransportFactory((options) => smtp.openTransport(options, { workers: true, loader }));
+  try {
+    const session = await smtp.connectSmtp({ host: 'smtp.acme.com', port: 587, security: 'starttls', username: 'u', password: 'p', fromEmail: 'ada@acme.com' });
+    const r = await session.send({ to: 'lead@x.com', subject: 'Hi', text: '.leading dot', html: '<p>x</p>' });
+    await session.close();
+    assert.equal(r.id, 'W1');
+    assert.equal(log.tlsUpgraded, true);
+    const order = log.lines.map((l) => l.replace(/ .*/, ''));
+    assert.deepEqual(order.slice(0, 4), ['plain:EHLO', 'plain:STARTTLS', 'tls:EHLO', 'tls:AUTH']);
+    assert.ok(!log.lines.some((l) => l.startsWith('plain:AUTH')), 'credentials never go over plain text');
+    assert.ok(log.lines.includes('tls:RCPT TO:<lead@x.com>'));
+    assert.equal(log.closed, 1);
+  } finally {
+    smtp.setSmtpTransportFactory(null);
+  }
+});
+
+test('Workers implicit TLS (465) needs no upgrade', async () => {
+  const { log, loader } = fakeWorkersServer();
+  smtp.setSmtpTransportFactory((options) => smtp.openTransport(options, { workers: true, loader }));
+  try {
+    await smtp.verifySmtp({ host: 'smtp.acme.com', port: 465, security: 'tls', username: 'u', password: 'p', fromEmail: 'a@acme.com' });
+    assert.equal(log.tlsUpgraded, false);
+    assert.equal(log.connects[0].opts.secureTransport, 'on');
+    assert.ok(log.lines[0].startsWith('tls:EHLO'));
+  } finally {
+    smtp.setSmtpTransportFactory(null);
+  }
+});

@@ -20,6 +20,10 @@ const BATCH = 100;
 // Per send request: Workers allow few outbound requests per invocation, so a campaign goes out in
 // chunks and the dashboard calls send again until nothing remains.
 const MAX_PER_CALL = 1000;
+// SMTP sends one message per round trips on a single connection, so on Workers a request sends fewer
+// (2 batches = 2 TCP connections, well under the 6 open-connection limit, and the request finishes
+// before proxies give up on it). The dashboard keeps calling send, so big campaigns still finish.
+const SMTP_MAX_PER_CALL_WORKERS = 200;
 const EMAIL_RE = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]{2,}$/;
 
 function fail(message, status = 400) {
@@ -457,9 +461,6 @@ function smtpMessage(msg) {
 }
 
 async function openSmtp() {
-  if (onWorkers()) {
-    throw fail('SMTP sending needs the Node server: Cloudflare Workers cannot open SMTP connections reliably (port 25 is blocked and STARTTLS is not supported). Use Resend on the Cloudflare deploy, or run Socialbrewery with npm start.', 400);
-  }
   const options = smtpOptions();
   const problems = validateSmtp(options);
   if (problems.length) throw fail(problems[0]);
@@ -595,7 +596,8 @@ export async function sendCampaignChunk(id) {
   const audience = audienceOf(campaign, leads).filter((l) => !block.has(l.email));
   if (!audience.length) throw fail('No subscribed leads match this campaign’s audience.');
   const pending = audience.filter((l) => !log[l.email]);
-  const chunk = pending.slice(0, MAX_PER_CALL);
+  const perCall = emailProvider() === 'smtp' && onWorkers() ? SMTP_MAX_PER_CALL_WORKERS : MAX_PER_CALL;
+  const chunk = pending.slice(0, perCall);
 
   await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id && c.status !== 'sending' ? { ...c, status: 'sending', startedAt: c.startedAt || now() } : c)));
   const results = {};

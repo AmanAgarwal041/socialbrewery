@@ -497,7 +497,7 @@ function EmailSettings({
             </CardTitle>
             <Badge variant="outline">
               {chosen === "smtp"
-                ? "Needs the Node server, not Cloudflare"
+                ? "Ports 465 and 587 work, on Node and Cloudflare"
                 : "Works everywhere"}
             </Badge>
           </div>
