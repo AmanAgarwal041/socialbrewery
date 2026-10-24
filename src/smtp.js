@@ -12,7 +12,13 @@ import { onWorkers } from './storage.js';
 
 export const SMTP_SECURITY = ['tls', 'starttls', 'none'];
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
-const TIMEOUT = 20_000;
+/** Per-stage I/O budget (connect, greeting, EHLO, STARTTLS, AUTH, MAIL, RCPT, DATA). */
+let TIMEOUT = 20_000;
+
+/** For tests: shorten (or restore) the SMTP I/O timeout. */
+export function setSmtpTimeoutMs(ms) {
+  TIMEOUT = Number(ms) > 0 ? Number(ms) : 20_000;
+}
 
 export class SmtpError extends Error {
   constructor(message, code = 0, { permanent = false } = {}) {
@@ -20,6 +26,18 @@ export class SmtpError extends Error {
     this.code = code;
     this.permanent = permanent;
   }
+}
+
+function timeoutError(stage) {
+  return new SmtpError(stage ? `The SMTP server did not answer in time (${stage}).` : 'The SMTP server did not answer in time.');
+}
+
+function withTimeout(promise, stage) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(timeoutError(stage)), TIMEOUT);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** Checks SMTP settings and returns a list of readable problems (empty when fine). */
@@ -113,8 +131,9 @@ export function nodeSocketTransport(socket, tlsModule) {
   socket.on('data', onData);
   socket.on('error', onError);
   socket.on('close', onClose);
+  let stage = '';
   socket.setTimeout?.(TIMEOUT, () => {
-    onEnd(new SmtpError('The SMTP server did not answer in time.'));
+    onEnd(timeoutError(stage));
     socket.destroy();
   });
   const detach = () => {
@@ -124,15 +143,20 @@ export function nodeSocketTransport(socket, tlsModule) {
     socket.setTimeout?.(0);
   };
   return {
+    closed: false,
     write: async (text) => void socket.write(text),
-    read: () =>
-      chunks.length
+    read: (nextStage = '') => {
+      stage = nextStage || stage;
+      // Activity resets the idle timer; re-arm so a slow next stage still times out.
+      socket.setTimeout?.(TIMEOUT);
+      return chunks.length
         ? Promise.resolve(chunks.shift())
         : ended
           ? ended === 'end'
             ? Promise.resolve(null)
             : Promise.reject(ended)
-          : new Promise((resolve, reject) => waiters.push({ resolve, reject })),
+          : new Promise((resolve, reject) => waiters.push({ resolve, reject }));
+    },
     async startTls(host, extra = {}) {
       detach();
       const secured = await new Promise((resolve, reject) => {
@@ -142,6 +166,7 @@ export function nodeSocketTransport(socket, tlsModule) {
       return nodeSocketTransport(secured, tlsModule);
     },
     async close() {
+      this.closed = true;
       detach();
       socket.destroy();
     },
@@ -155,7 +180,9 @@ export function workersSocketTransport(socket) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let released = false;
-  const release = () => {
+  let closed = false;
+  // Unlock without destroying: required before socket.startTls(), which reuses the connection.
+  const unlock = () => {
     if (released) return;
     released = true;
     try {
@@ -165,32 +192,61 @@ export function workersSocketTransport(socket) {
       writer.releaseLock();
     } catch {}
   };
-  return {
-    write: (text) => writer.write(encoder.encode(text)),
-    async read() {
-      let timer;
-      const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new SmtpError('The SMTP server did not answer in time.')), TIMEOUT);
-      });
+  // Abort any pending reader.read() and drop the socket so a timed-out request cannot leave the
+  // stream locked (Promise.race alone would orphan the read and break the next I/O / close).
+  const destroy = async (err) => {
+    if (closed) return;
+    closed = true;
+    await reader.cancel(err?.message || 'error').catch(() => {});
+    await writer.abort(err?.message || 'error').catch(() => {});
+    unlock();
+    await socket.close().catch(() => {});
+  };
+  const transport = {
+    get closed() {
+      return closed;
+    },
+    async write(text, stage = '') {
+      if (closed) throw new SmtpError('The SMTP connection is closed.');
       try {
-        const { value, done } = await Promise.race([reader.read(), timeout]);
-        return done ? null : decoder.decode(value, { stream: true });
+        await withTimeout(writer.write(encoder.encode(text)), stage);
       } catch (err) {
-        throw err instanceof SmtpError ? err : new SmtpError(`SMTP connection failed: ${err.message}`);
-      } finally {
-        clearTimeout(timer);
+        const e = err instanceof SmtpError ? err : new SmtpError(`SMTP connection failed: ${err.message}`);
+        await destroy(e);
+        throw e;
       }
     },
-    async startTls() {
-      // startTls() needs the plain streams unlocked; it returns a new socket over TLS.
-      release();
-      return workersSocketTransport(socket.startTls());
+    async read(stage = '') {
+      if (closed) throw new SmtpError('The SMTP connection is closed.');
+      // Hold the read promise so a losing race still gets a .catch (avoids unhandled rejection when
+      // destroy() cancels the reader after our timeout wins).
+      const pending = reader.read();
+      pending.catch(() => {});
+      try {
+        const { value, done } = await withTimeout(pending, stage);
+        return done ? null : decoder.decode(value, { stream: true });
+      } catch (err) {
+        const e = err instanceof SmtpError ? err : new SmtpError(`SMTP connection failed: ${err.message}`);
+        await destroy(e);
+        throw e;
+      }
+    },
+    async startTls(host) {
+      if (closed) throw new SmtpError('The SMTP connection is closed.');
+      // This plain transport is finished; startTls() closes it and returns a new TLS socket.
+      closed = true;
+      unlock();
+      const opts = host && !isIp(host) ? { expectedServerHostname: host } : {};
+      return workersSocketTransport(socket.startTls(opts));
     },
     async close() {
-      release();
+      if (closed) return;
+      closed = true;
+      unlock();
       await socket.close().catch(() => {});
     },
   };
+  return transport;
 }
 
 let transportFactory = null;
@@ -217,8 +273,16 @@ export async function openTransport(options, { workers = onWorkers(), loader = l
     const secureTransport = security === 'tls' ? 'on' : security === 'starttls' ? 'starttls' : 'off';
     const socket = connect({ hostname: options.host, port: Number(options.port) }, { secureTransport, allowHalfOpen: false });
     try {
-      await socket.opened;
+      // Workers' socket.opened has no built-in deadline (Node connect does); bound it so a hung SYN
+      // cannot burn the whole request before the first SMTP read timeout.
+      await withTimeout(socket.opened, 'connect');
     } catch (err) {
+      await socket.close().catch(() => {});
+      if (err instanceof SmtpError) {
+        throw err.message.includes('did not answer in time')
+          ? new SmtpError(`Timed out connecting to ${where}.`)
+          : err;
+      }
       throw new SmtpError(`Could not reach ${where}: ${err.message}`);
     }
     return workersSocketTransport(socket);
@@ -255,7 +319,7 @@ class Conn {
     this.buffer = '';
     this.lines = [];
   }
-  async read() {
+  async read(stage = '') {
     for (;;) {
       const end = this.lines.findIndex((l) => /^\d{3}(?: |$)/.test(l));
       if (end >= 0) {
@@ -264,7 +328,7 @@ class Conn {
         const lines = block.map((l) => l.slice(4));
         return { code, lines, text: lines.join(' ') };
       }
-      const chunk = await this.t.read();
+      const chunk = await this.t.read(stage);
       if (chunk == null) throw new SmtpError('The SMTP server closed the connection.');
       this.buffer += chunk;
       let i;
@@ -274,9 +338,9 @@ class Conn {
       }
     }
   }
-  async cmd(line, expect, label = line.split(' ')[0]) {
-    if (line != null) await this.t.write(`${line}\r\n`);
-    const reply = await this.read();
+  async cmd(line, expect, label = line == null ? '' : line.split(' ')[0]) {
+    if (line != null) await this.t.write(`${line}\r\n`, label);
+    const reply = await this.read(label);
     if (!expect.includes(reply.code)) {
       throw new SmtpError(`SMTP ${label} failed: ${reply.code} ${reply.text}`.trim(), reply.code, { permanent: reply.code >= 500 });
     }
@@ -292,12 +356,12 @@ export async function connectSmtp(options) {
   const close = () => conn.t.close().catch(() => {});
   try {
     await conn.cmd(null, [220], 'greeting');
-    let ehlo = await conn.cmd(`EHLO ${name}`, [250]);
+    let ehlo = await conn.cmd(`EHLO ${name}`, [250], 'EHLO');
     if (security === 'starttls') {
       if (!ehlo.lines.some((l) => /^STARTTLS\b/i.test(l))) throw new SmtpError('The SMTP server does not offer STARTTLS. Try security "tls" on port 465.');
-      await conn.cmd('STARTTLS', [220]);
+      await conn.cmd('STARTTLS', [220], 'STARTTLS');
       conn.use(await conn.t.startTls(options.host, options.tls));
-      ehlo = await conn.cmd(`EHLO ${name}`, [250]);
+      ehlo = await conn.cmd(`EHLO ${name}`, [250], 'EHLO');
     }
     var ehloReply = ehlo;
   } catch (err) {
@@ -328,19 +392,26 @@ export async function connectSmtp(options) {
       try {
         await conn.cmd(`MAIL FROM:<${clean(options.fromEmail)}>`, [250], 'MAIL FROM');
         await conn.cmd(`RCPT TO:<${clean(msg.to)}>`, [250, 251], 'RCPT TO');
-        await conn.cmd('DATA', [354]);
+        await conn.cmd('DATA', [354], 'DATA');
+        // Flush the full MIME (plus terminating ".") as one write with a DATA-stage timeout, then
+        // wait for 250. Avoids stuffing a multi-kilobyte campaign body through cmd()'s line helper.
         const body = buildMime({ ...msg, fromName: options.fromName, fromEmail: options.fromEmail, replyTo: msg.replyTo ?? options.replyTo }, domain)
           .replace(/\r\n\./g, '\r\n..');
-        const reply = await conn.cmd(`${body}\r\n.`, [250], 'DATA');
+        const payload = body.endsWith('\r\n') ? `${body}.\r\n` : `${body}\r\n.\r\n`;
+        await conn.t.write(payload, 'DATA');
+        const reply = await conn.cmd(null, [250], 'DATA');
         return { id: (/queued as\s+(\S+)/i.exec(reply.text) || [])[1] || '' };
       } catch (err) {
         // A refused recipient leaves the transaction open; reset so the next message can go.
-        if (err instanceof SmtpError && err.code) await conn.cmd('RSET', [250]).catch(() => {});
+        // Skip RSET when the transport is already dead (timeout/cancel) — that path closed the socket.
+        if (err instanceof SmtpError && err.code && !conn.t.closed) await conn.cmd('RSET', [250], 'RSET').catch(() => {});
         throw err;
       }
     },
     async close() {
-      await conn.cmd('QUIT', [221]).catch(() => {});
+      // After a read/write timeout the Workers transport has already destroyed the socket; skip QUIT
+      // so we do not start another reader.read() on a locked or canceled stream.
+      if (!conn.t.closed) await conn.cmd('QUIT', [221], 'QUIT').catch(() => {});
       await close();
     },
   };

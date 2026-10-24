@@ -242,9 +242,10 @@ function fakeWorkersServer({ authLines = 'AUTH PLAIN LOGIN' } = {}) {
       readable,
       writable,
       opened: Promise.resolve({}),
-      startTls() {
+      startTls(opts = {}) {
         assert.equal(secure, false, 'startTls only on the plain socket');
         log.tlsUpgraded = true;
+        log.startTlsOpts = opts;
         return makeSocket(true);
       },
       async close() {
@@ -315,5 +316,153 @@ test('Workers implicit TLS (465) needs no upgrade', async () => {
     assert.ok(log.lines[0].startsWith('tls:EHLO'));
   } finally {
     smtp.setSmtpTransportFactory(null);
+  }
+});
+
+test('Workers STARTTLS passes expectedServerHostname to startTls', async () => {
+  const { log, loader } = fakeWorkersServer();
+  smtp.setSmtpTransportFactory((options) => smtp.openTransport(options, { workers: true, loader }));
+  try {
+    await smtp.verifySmtp({ host: 'smtp.acme.com', port: 587, security: 'starttls', username: 'u', password: 'p', fromEmail: 'a@acme.com' });
+    assert.deepEqual(log.startTlsOpts, { expectedServerHostname: 'smtp.acme.com' });
+  } finally {
+    smtp.setSmtpTransportFactory(null);
+  }
+});
+
+test('Workers read timeout cancels the pending reader and closes the socket', async () => {
+  smtp.setSmtpTimeoutMs(40);
+  const log = { closed: 0, cancel: 0 };
+  let controller;
+  const socket = {
+    readable: new ReadableStream({
+      start(c) {
+        controller = c;
+        // Never enqueue — forces the read timeout path.
+      },
+      cancel() {
+        log.cancel++;
+      },
+    }),
+    writable: new WritableStream({
+      write() {},
+    }),
+    opened: Promise.resolve({}),
+    async close() {
+      log.closed++;
+      try {
+        controller?.close();
+      } catch {}
+    },
+  };
+  const t = smtp.workersSocketTransport(socket);
+  try {
+    await assert.rejects(() => t.read('greeting'), /did not answer in time \(greeting\)/);
+    assert.equal(t.closed, true);
+    assert.ok(log.cancel >= 1, 'pending reader must be canceled so the stream is not left locked');
+    assert.ok(log.closed >= 1, 'socket must close on timeout');
+    // A follow-up close must be a no-op (no second hang / second read).
+    await t.close();
+    await assert.rejects(() => t.read('EHLO'), /closed/);
+  } finally {
+    smtp.setSmtpTimeoutMs(20_000);
+  }
+});
+
+test('Workers connect times out when socket.opened never resolves', async () => {
+  smtp.setSmtpTimeoutMs(40);
+  const log = { closed: 0 };
+  const loader = async (mod) => {
+    assert.equal(mod, 'cloudflare:sockets');
+    return {
+      connect() {
+        return {
+          opened: new Promise(() => {}),
+          async close() {
+            log.closed++;
+          },
+        };
+      },
+    };
+  };
+  try {
+    await assert.rejects(
+      smtp.openTransport({ host: 'smtp.acme.com', port: 587, security: 'starttls' }, { workers: true, loader }),
+      /Timed out connecting to smtp\.acme\.com:587/,
+    );
+    assert.equal(log.closed, 1);
+  } finally {
+    smtp.setSmtpTimeoutMs(20_000);
+  }
+});
+
+test('Workers DATA timeout names the stage and still allows session.close', async () => {
+  smtp.setSmtpTimeoutMs(50);
+  const log = { closed: 0, lines: [] };
+  function makeSocket(secure) {
+    let controller;
+    let buf = '';
+    let afterData = false;
+    const send = (t) => controller.enqueue(new TextEncoder().encode(t));
+    return {
+      readable: new ReadableStream({
+        start(c) {
+          controller = c;
+          if (!secure) send('220 fake\r\n');
+        },
+      }),
+      writable: new WritableStream({
+        write(chunk) {
+          buf += new TextDecoder().decode(chunk);
+          let i;
+          while ((i = buf.indexOf('\r\n')) >= 0) {
+            const line = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            if (afterData) continue; // swallow MIME; never reply 250 — triggers DATA timeout
+            log.lines.push(line);
+            if (/^EHLO/.test(line)) send(secure ? '250-fake\r\n250 AUTH PLAIN\r\n' : '250-fake\r\n250 STARTTLS\r\n');
+            else if (line === 'STARTTLS') send('220 go\r\n');
+            else if (/^AUTH PLAIN/.test(line)) send('235 ok\r\n');
+            else if (/^(MAIL|RCPT)/.test(line)) send('250 ok\r\n');
+            else if (line === 'DATA') {
+              afterData = true;
+              send('354 go\r\n');
+            } else if (line === 'QUIT') send('221 bye\r\n');
+          }
+        },
+      }),
+      opened: Promise.resolve({}),
+      startTls() {
+        return makeSocket(true);
+      },
+      async close() {
+        log.closed++;
+      },
+    };
+  }
+  const loader = async () => ({
+    connect() {
+      return makeSocket(false);
+    },
+  });
+  smtp.setSmtpTransportFactory((options) => smtp.openTransport(options, { workers: true, loader }));
+  try {
+    const session = await smtp.connectSmtp({
+      host: 'smtp.acme.com',
+      port: 587,
+      security: 'starttls',
+      username: 'u',
+      password: 'p',
+      fromEmail: 'ada@acme.com',
+    });
+    await assert.rejects(
+      session.send({ to: 'lead@x.com', subject: 'Hi', text: 'hello', html: '<p>hello</p>', headers: { 'List-Unsubscribe': '<https://x/u>' } }),
+      /did not answer in time \(DATA\)/,
+    );
+    await session.close();
+    assert.ok(log.closed >= 1);
+  } finally {
+    smtp.setSmtpTransportFactory(null);
+    smtp.setSmtpTimeoutMs(20_000);
   }
 });
