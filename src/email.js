@@ -43,7 +43,7 @@ const files = {
 // Default OpenLIT Enterprise header (served from /email/… via the static dashboard assets).
 export const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise';
 export const DEFAULT_BANNER_LINK = 'https://openlit.io';
-export const defaultBannerImageUrl = () => `${appUrl()}/email/openlit-enterprise-banner.jpg`;
+export const defaultBannerImageUrl = () => `${appUrl()}/email/openlit-enterprise-banner.png`;
 
 // 1×1 transparent GIF for open tracking (always returned, even for bad signatures).
 export const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');

@@ -135,7 +135,7 @@ test('campaign banner can be toggled and overridden; open pixels are signed and 
     });
     assert.equal(on.bannerEnabled, true);
     const withDefault = email.renderEmail(on, lead);
-    assert.match(withDefault.html, /https:\/\/brew\.example\.com\/email\/openlit-enterprise-banner\.jpg/);
+    assert.match(withDefault.html, /https:\/\/brew\.example\.com\/email\/openlit-enterprise-banner\.png/);
     assert.match(withDefault.html, /alt="OpenLIT Enterprise"/);
     assert.match(withDefault.html, /href="https:\/\/openlit\.io"/);
 

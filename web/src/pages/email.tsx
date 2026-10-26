@@ -69,7 +69,7 @@ function merge(template: string, lead: Partial<Lead>) {
 
 const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise'
 const DEFAULT_BANNER_LINK = 'https://openlit.io'
-const defaultBannerImageUrl = () => `${window.location.origin}/email/openlit-enterprise-banner.jpg`
+const defaultBannerImageUrl = () => `${window.location.origin}/email/openlit-enterprise-banner.png`
 
 // The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
 function Formatted({ text }: { text: string }) {
