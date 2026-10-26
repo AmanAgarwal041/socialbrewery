@@ -43,6 +43,9 @@ import {
   updateLead,
   verifyResendWebhook,
   verifyUnsubscribe,
+  verifyOpen,
+  recordOpen,
+  TRACKING_PIXEL,
 } from './email.js';
 import { sign, verifySignature } from './secure.js';
 import { AGENT_PROVIDERS, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
@@ -564,6 +567,30 @@ async function route(req, res) {
     const html = unsubscribePage({ orgName: org.name, done: req.method === 'POST', action: `${pathname}${url.search}` });
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     res.end(html);
+    return;
+  }
+
+  // Open-tracking pixel: always returns a 1×1 GIF so mail clients never show a broken image.
+  // Invalid signatures are ignored quietly; test-send lead ids are not counted.
+  const openHit = pathname.match(/^\/public\/open\/([a-f0-9]{24})\/([a-f0-9]{16})\/([a-f0-9]{16})$/);
+  if (req.method === 'GET' && openHit) {
+    const [, orgId, campaignId, leadId] = openHit;
+    if (verifyOpen(orgId, campaignId, leadId, url.searchParams.get('sig'))) {
+      const org = await getOrg(orgId);
+      if (org) {
+        await runWithOrg(await orgContext(org, 'member', null), () => recordOpen(campaignId, leadId)).catch(() => null);
+      }
+    }
+    res.writeHead(200, {
+      'Content-Type': 'image/gif',
+      'Content-Length': TRACKING_PIXEL.length,
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      Pragma: 'no-cache',
+      Expires: '0',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    });
+    res.end(TRACKING_PIXEL);
     return;
   }
 

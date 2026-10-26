@@ -228,6 +228,23 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal(leadsAfter.leads.find((l) => l.id === leadId).status, 'unsubscribed');
     assert.equal((await fetch(`${base}/webhooks/resend/${org.id}`, { method: 'POST', body: '{}' })).status, 401);
 
+    // Open-tracking pixel: always a GIF; bad signatures still return the image and count nothing.
+    const openCampaign = await fetch(`${base}/api/email/campaigns`, as(adminToken, { method: 'POST', body: JSON.stringify({ subject: 'Ping', body: 'Hello' }) })).then((res) => res.json());
+    const campaignId = openCampaign.campaign.id;
+    const openLead = await fetch(`${base}/api/email/leads`, as(adminToken, { method: 'POST', body: JSON.stringify({ email: 'open@example.com', firstName: 'Opener' }) })).then((res) => res.json());
+    const openLeadId = openLead.lead.id;
+    const openUrl = `${base}/public/open/${org.id}/${campaignId}/${openLeadId}?sig=${sign(`open:${org.id}:${campaignId}:${openLeadId}`)}`;
+    const pixel = await fetch(openUrl);
+    assert.equal(pixel.status, 200);
+    assert.match(pixel.headers.get('content-type'), /image\/gif/);
+    assert.equal(Buffer.from(await pixel.arrayBuffer()).length, 42);
+    const forgedPixel = await fetch(`${base}/public/open/${org.id}/${campaignId}/${openLeadId}?sig=forged`);
+    assert.equal(forgedPixel.status, 200);
+    assert.match(forgedPixel.headers.get('content-type'), /image\/gif/);
+    const afterOpen = await fetch(`${base}/api/email/campaigns/${campaignId}`, as(adminToken)).then((res) => res.json());
+    assert.equal(afterOpen.campaign.stats.opens, 1);
+    assert.equal(afterOpen.campaign.stats.openCount, 1);
+
     // Connecting a network: the callback can arrive after the Clerk token expired, so the connect step
     // leaves a signed ticket for that organisation. Without it, a callback is not signed in.
     const connect = await fetch(`${base}/api/youtube/connect`, { headers: { Cookie: `__session=${adminToken}` }, redirect: 'manual' });

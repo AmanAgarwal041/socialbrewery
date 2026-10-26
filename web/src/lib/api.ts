@@ -143,11 +143,15 @@ export type Campaign = {
   subject: string
   body: string
   audienceTags: string[]
+  /** Optional OpenLIT (or custom) header banner above the body. */
+  bannerEnabled?: boolean
+  bannerImageUrl?: string
+  bannerLinkUrl?: string
   status: 'draft' | 'sending' | 'paused' | 'sent'
   createdAt: string
   updatedAt: string
   sentAt: string
-  stats: { sent: number; failed: number }
+  stats: { sent: number; failed: number; opens?: number; openCount?: number }
 }
 export type EmailStatus = {
   ready: boolean

@@ -37,7 +37,17 @@ const files = {
   suppressed: () => path.join(orgDataDir(), 'email-suppressed.json'),
   campaigns: () => path.join(orgDataDir(), 'email-campaigns.json'),
   log: (id) => path.join(orgDataDir(), `email-log-${id}.json`),
+  opens: (id) => path.join(orgDataDir(), `email-opens-${id}.json`),
 };
+
+// Default OpenLIT Enterprise header (served from /email/… via the static dashboard assets).
+export const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise';
+export const DEFAULT_BANNER_LINK = 'https://openlit.io';
+export const defaultBannerImageUrl = () => `${appUrl()}/email/openlit-enterprise-banner.jpg`;
+
+// 1×1 transparent GIF for open tracking (always returned, even for bad signatures).
+export const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+const TEST_LEAD_ID = '0'.repeat(16);
 
 const newId = () => randomBytes(8).toString('hex');
 const now = () => new Date().toISOString();
@@ -362,14 +372,41 @@ export async function getCampaign(id) {
   return (await listCampaigns()).find((c) => c.id === id) || null;
 }
 
+function cleanHttpUrl(value, max = 2000) {
+  const raw = String(value ?? '').trim().slice(0, max);
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 function campaignFields(fields, base = {}) {
+  const bannerEnabled =
+    fields.bannerEnabled !== undefined ? Boolean(fields.bannerEnabled) : base.bannerEnabled === true;
   return {
     ...base,
     name: text(fields.name ?? base.name, 120) || 'Untitled campaign',
     subject: text(fields.subject ?? base.subject, 200),
     body: String(fields.body ?? base.body ?? '').slice(0, 20000),
     audienceTags: fields.audienceTags !== undefined ? cleanTags(fields.audienceTags) : base.audienceTags || [],
+    bannerEnabled,
+    bannerImageUrl:
+      fields.bannerImageUrl !== undefined
+        ? cleanHttpUrl(fields.bannerImageUrl)
+        : cleanHttpUrl(base.bannerImageUrl || ''),
+    bannerLinkUrl:
+      fields.bannerLinkUrl !== undefined
+        ? cleanHttpUrl(fields.bannerLinkUrl)
+        : cleanHttpUrl(base.bannerLinkUrl || ''),
   };
+}
+
+function emptyStats(extra = {}) {
+  return { sent: 0, failed: 0, opens: 0, openCount: 0, ...extra };
 }
 
 export async function saveCampaign(id, fields) {
@@ -377,7 +414,15 @@ export async function saveCampaign(id, fields) {
   await updateJson(files.campaigns(), [], (campaigns) => {
     const list = Array.isArray(campaigns) ? campaigns : [];
     if (!id) {
-      saved = { id: newId(), ...campaignFields(fields), status: 'draft', createdAt: now(), updatedAt: now(), sentAt: '', stats: { sent: 0, failed: 0 } };
+      saved = {
+        id: newId(),
+        ...campaignFields(fields),
+        status: 'draft',
+        createdAt: now(),
+        updatedAt: now(),
+        sentAt: '',
+        stats: emptyStats(),
+      };
       return [saved, ...list].slice(0, 200);
     }
     return list.map((c) => {
@@ -403,14 +448,21 @@ function audienceOf(campaign, leads) {
 export async function campaignDetails(id) {
   const campaign = await getCampaign(id);
   if (!campaign) throw fail('That campaign is gone.', 404);
-  const [leads, log] = await Promise.all([listLeads(), readJson(files.log(id), {})]);
+  const [leads, log, opens] = await Promise.all([listLeads(), readJson(files.log(id), {}), readJson(files.opens(id), {})]);
   const audience = audienceOf(campaign, leads);
   const remaining = audience.filter((l) => !log[l.email]).length;
   const failures = Object.entries(log)
     .filter(([, v]) => v.s === 'failed')
     .slice(0, 50)
     .map(([email, v]) => ({ email, error: v.e || '' }));
-  return { campaign, audience: audience.length, remaining, failures };
+  const openEntries = opens && typeof opens === 'object' ? Object.values(opens) : [];
+  const openStats = {
+    opens: openEntries.length,
+    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
+  };
+  // Keep campaign.stats in sync for the list view without rewriting on every details fetch.
+  const stats = { ...emptyStats(campaign.stats || {}), ...openStats, sent: campaign.stats?.sent || 0, failed: campaign.stats?.failed || 0 };
+  return { campaign: { ...campaign, stats }, audience: audience.length, remaining, failures };
 }
 
 // ---------- rendering ----------
@@ -448,19 +500,90 @@ export function merge(template, lead) {
   });
 }
 
-// A small, safe Markdown subset: paragraphs, line breaks, **bold**, _italic_, [links](https://…) and bare links.
-function bodyHtml(body) {
+const IMG_STYLE = 'display:block;max-width:100%;height:auto;border:0;outline:none;text-decoration:none';
+
+/** Safe http(s) URL for an <img src> after merge + HTML escaping (entities allowed). */
+function safeImageSrc(raw) {
+  const value = String(raw || '')
+    .trim()
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'");
+  if (!/^https?:\/\//i.test(value)) return '';
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return escapeHtml(url.toString());
+  } catch {
+    return '';
+  }
+}
+
+/** Replace markdown images, allowing nested parentheses in the URL (e.g. rejected javascript:alert(1)). */
+function replaceMarkdownImages(html) {
+  let out = '';
+  let i = 0;
+  while (i < html.length) {
+    if (html.startsWith('![', i)) {
+      const altEnd = html.indexOf(']', i + 2);
+      if (altEnd !== -1 && html[altEnd + 1] === '(') {
+        let depth = 1;
+        let j = altEnd + 2;
+        while (j < html.length && depth > 0) {
+          if (html[j] === '(') depth++;
+          else if (html[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          const alt = html.slice(i + 2, altEnd);
+          const url = html.slice(altEnd + 2, j - 1);
+          const src = safeImageSrc(url);
+          if (src) out += `<img src="${src}" alt="${alt}" width="600" style="${IMG_STYLE};margin:0 0 16px" />`;
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += html[i];
+    i++;
+  }
+  return out;
+}
+
+// A small, safe Markdown subset: paragraphs, line breaks, images, **bold**, _italic_, [links](https://…) and bare links.
+// Images support merge-bound URLs/alts after merge() runs: ![{{product}}]({{hero_image|https://fallback}}).
+export function bodyHtml(body) {
   return body
     .trim()
     .split(/\n{2,}/)
     .map((paragraph) => {
       let html = escapeHtml(paragraph);
+      // Images before links so ![alt](url) is not treated as a markdown link.
+      html = replaceMarkdownImages(html);
       html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}">${label}</a>`);
       html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}">${url}</a>`);
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|\W)_([^_]+)_(?=\W|$)/g, '$1<em>$2</em>');
+      const trimmed = html.replace(/^(?:<br>\s*)+|(?:<br>\s*)+$/g, '').trim();
+      if (!trimmed) return '';
+      // A paragraph that is only an image: skip the wrapping <p> margins doubling up.
+      if (/^<img\b[^>]*>$/i.test(trimmed)) return trimmed;
       return `<p style="margin:0 0 16px">${html.replace(/\n/g, '<br>')}</p>`;
     })
+    .filter(Boolean)
     .join('\n');
+}
+
+function bannerHtml(campaign) {
+  if (!campaign?.bannerEnabled) return '';
+  const src = safeImageSrc(campaign.bannerImageUrl) || safeImageSrc(defaultBannerImageUrl());
+  if (!src) return '';
+  const href = cleanHttpUrl(campaign.bannerLinkUrl) || DEFAULT_BANNER_LINK;
+  const alt = escapeHtml(DEFAULT_BANNER_ALT);
+  const img = `<img src="${src}" alt="${alt}" width="600" style="${IMG_STYLE};width:100%;max-width:600px" />`;
+  const inner = href
+    ? `<a href="${escapeHtml(href)}" style="text-decoration:none;border:0">${img}</a>`
+    : img;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border-collapse:collapse"><tr><td style="padding:0">${inner}</td></tr></table>`;
 }
 
 function unsubscribeUrl(orgId, leadId) {
@@ -471,6 +594,24 @@ export function verifyUnsubscribe(orgId, leadId, sig) {
   return verifySignature(`unsub:${orgId}:${leadId}`, sig);
 }
 
+function openPayload(orgId, campaignId, leadId) {
+  return `open:${orgId}:${campaignId}:${leadId}`;
+}
+
+export function openTrackingUrl(orgId, campaignId, leadId) {
+  return `${appUrl()}/public/open/${orgId}/${campaignId}/${leadId}?sig=${sign(openPayload(orgId, campaignId, leadId))}`;
+}
+
+export function verifyOpen(orgId, campaignId, leadId, sig) {
+  return isEmailId(campaignId) && isEmailId(leadId) && verifySignature(openPayload(orgId, campaignId, leadId), sig);
+}
+
+function trackingPixelHtml(orgId, campaignId, leadId) {
+  if (!campaignId || !leadId) return '';
+  const src = openTrackingUrl(orgId, campaignId, leadId);
+  return `<img src="${src}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;outline:none" />`;
+}
+
 export function renderEmail(campaign, lead) {
   const ctx = currentContext();
   const orgName = ctx?.org?.name || 'us';
@@ -478,11 +619,14 @@ export function renderEmail(campaign, lead) {
   const postal = cfg.EMAIL_POSTAL_ADDRESS || '';
   const body = merge(campaign.body, lead);
   const footerText = `\n\n--\n${postal}\nYou’re receiving this because you’re on ${orgName}’s list. Unsubscribe: ${unsubscribe}`;
+  const pixel = trackingPixelHtml(ctx.org.id, campaign.id, lead.id);
   const html = `<!doctype html><html><body style="margin:0;padding:24px;font:16px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a2e">
 <div style="max-width:600px;margin:0 auto">
+${bannerHtml(campaign)}
 ${bodyHtml(body)}
 <hr style="border:0;border-top:1px solid #e5e5ef;margin:28px 0 12px">
 <p style="margin:0;font-size:12px;color:#77778a">${escapeHtml(postal)}<br>You’re receiving this because you’re on ${escapeHtml(orgName)}’s list. <a href="${unsubscribe}" style="color:#77778a">Unsubscribe</a></p>
+${pixel}
 </div></body></html>`;
   return {
     subject: merge(campaign.subject, lead),
@@ -721,7 +865,14 @@ export async function sendCampaignChunk(id) {
   }
   const remaining = pending.length - chunk.length;
   const all = Object.values(merged);
-  const stats = { sent: all.filter((r) => r.s === 'sent').length, failed: all.filter((r) => r.s === 'failed').length };
+  const openMap = await readJson(files.opens(id), {});
+  const openEntries = openMap && typeof openMap === 'object' ? Object.values(openMap) : [];
+  const stats = emptyStats({
+    sent: all.filter((r) => r.s === 'sent').length,
+    failed: all.filter((r) => r.s === 'failed').length,
+    opens: openEntries.length,
+    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
+  });
   const status = remaining <= 0 ? 'sent' : 'sending';
   await updateJson(files.campaigns(), [], (list) =>
     list.map((c) => (c.id === id ? { ...c, status, stats, ...(status === 'sent' ? { sentAt: now() } : {}) } : c)),
@@ -742,6 +893,42 @@ export async function retryFailed(id) {
   });
   if (cleared) await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id ? { ...c, status: 'sending' } : c)));
   return { cleared };
+}
+
+// ---------- open tracking ----------
+
+/** Records an open for a real campaign lead. Test-pixel lead ids and unknown leads are ignored. */
+export async function recordOpen(campaignId, leadId) {
+  if (!isEmailId(campaignId) || !isEmailId(leadId) || leadId === TEST_LEAD_ID) return false;
+  const campaign = await getCampaign(campaignId);
+  if (!campaign) return false;
+  const lead = (await listLeads()).find((l) => l.id === leadId);
+  if (!lead) return false;
+  let created = false;
+  const opens = await updateJson(files.opens(campaignId), {}, (current) => {
+    const map = current && typeof current === 'object' ? { ...current } : {};
+    const prev = map[leadId];
+    if (!prev) {
+      created = true;
+      map[leadId] = { n: 1, first: now(), last: now(), email: lead.email };
+    } else {
+      map[leadId] = { ...prev, n: (Number(prev.n) || 0) + 1, last: now(), email: prev.email || lead.email };
+    }
+    return map;
+  });
+  const entries = Object.values(opens || {});
+  const openStats = {
+    opens: entries.length,
+    openCount: entries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
+  };
+  await updateJson(files.campaigns(), [], (list) =>
+    list.map((c) =>
+      c.id === campaignId
+        ? { ...c, stats: emptyStats({ ...(c.stats || {}), ...openStats }) }
+        : c,
+    ),
+  );
+  return created || true;
 }
 
 // ---------- unsubscribe and Resend webhooks ----------

@@ -74,7 +74,7 @@ test('importing needs consent, dedupes, and never resubscribes someone who opted
 test('emails merge fields, escape HTML, and always carry the address and unsubscribe link', async () => {
   await inNewOrg(SETTINGS, async (org) => {
     const lead = { id: 'a'.repeat(16), email: 'ada@x.com', firstName: '', company: '<Engines>' };
-    const rendered = email.renderEmail({ subject: 'Hi {{first_name|there}}', body: 'Hello {{first_name|there}} at {{company}}.\n\n**Bold** <script>x</script> [docs](https://acme.com/docs)' }, lead);
+    const rendered = email.renderEmail({ id: 'c'.repeat(16), subject: 'Hi {{first_name|there}}', body: 'Hello {{first_name|there}} at {{company}}.\n\n**Bold** <script>x</script> [docs](https://acme.com/docs)' }, lead);
     assert.equal(rendered.subject, 'Hi there');
     assert.match(rendered.html, /Hello there at &lt;Engines&gt;\./);
     assert.match(rendered.html, /<strong>Bold<\/strong> &lt;script&gt;x&lt;\/script&gt; <a href="https:\/\/acme.com\/docs">docs<\/a>/);
@@ -87,6 +87,99 @@ test('emails merge fields, escape HTML, and always carry the address and unsubsc
     const sig = new URL(rendered.headers['List-Unsubscribe'].slice(1, -1)).searchParams.get('sig');
     assert.equal(email.verifyUnsubscribe(org.id, lead.id, sig), true);
     assert.equal(email.verifyUnsubscribe(org.id, 'b'.repeat(16), sig), false);
+    const open = `https://brew.example.com/public/open/${org.id}/${'c'.repeat(16)}/${lead.id}?sig=`;
+    assert.ok(rendered.html.includes(open));
+    assert.match(rendered.html, /width="1" height="1"/);
+  });
+});
+
+test('markdown images merge URLs/alts, reject unsafe schemes, and skip empty src', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    const lead = {
+      id: 'a'.repeat(16),
+      email: 'ada@x.com',
+      meta: { product_name: 'OpenLIT', hero_image: 'https://cdn.example.com/hero.png', banner_url: '', empty_img: '' },
+    };
+    const withImage = email.renderEmail(
+      {
+        id: 'c'.repeat(16),
+        subject: 'Hi',
+        body: '![{{product_name}}]({{hero_image}})\n\nPlain ![OpenLIT]({{banner_url|https://openlit.io/mark.png}})\n\nBad ![x](javascript:alert(1))\n\nEmpty ![y]({{empty_img}})',
+      },
+      lead,
+    );
+    assert.match(withImage.html, /<img src="https:\/\/cdn\.example\.com\/hero\.png" alt="OpenLIT"/);
+    assert.match(withImage.html, /<img src="https:\/\/openlit\.io\/mark\.png" alt="OpenLIT"/);
+    assert.doesNotMatch(withImage.html, /javascript:/i);
+    assert.doesNotMatch(withImage.html, /src=""/);
+    assert.doesNotMatch(withImage.html, /!\[y\]/);
+    assert.doesNotMatch(withImage.html, /!\[x\]/);
+    assert.match(withImage.html, /<p style="margin:0 0 16px">Bad <\/p>/);
+  });
+});
+
+test('campaign banner can be toggled and overridden; open pixels are signed and recorded', async () => {
+  await inNewOrg(SETTINGS, async (org) => {
+    const lead = await email.addLead({ email: 'ada@x.com', firstName: 'Ada' });
+    const off = await email.saveCampaign('', { subject: 'S', body: 'Hello' });
+    const without = email.renderEmail(off, lead);
+    assert.doesNotMatch(without.html, /openlit-enterprise-banner/);
+    assert.doesNotMatch(without.html, /OpenLIT Enterprise/);
+
+    const on = await email.saveCampaign(off.id, {
+      subject: 'S',
+      body: 'Hello',
+      bannerEnabled: true,
+      bannerImageUrl: '',
+      bannerLinkUrl: '',
+    });
+    assert.equal(on.bannerEnabled, true);
+    const withDefault = email.renderEmail(on, lead);
+    assert.match(withDefault.html, /https:\/\/brew\.example\.com\/email\/openlit-enterprise-banner\.jpg/);
+    assert.match(withDefault.html, /alt="OpenLIT Enterprise"/);
+    assert.match(withDefault.html, /href="https:\/\/openlit\.io"/);
+
+    const custom = await email.saveCampaign(on.id, {
+      subject: 'S',
+      body: 'Hello',
+      bannerEnabled: true,
+      bannerImageUrl: 'https://cdn.example.com/custom.png',
+      bannerLinkUrl: 'https://openlit.io/enterprise',
+    });
+    const withCustom = email.renderEmail(custom, lead);
+    assert.match(withCustom.html, /src="https:\/\/cdn\.example\.com\/custom\.png"/);
+    assert.match(withCustom.html, /href="https:\/\/openlit\.io\/enterprise"/);
+    assert.doesNotMatch(withCustom.html, /javascript:/i);
+
+    const rejected = await email.saveCampaign(custom.id, {
+      subject: 'S',
+      body: 'Hello',
+      bannerEnabled: true,
+      bannerImageUrl: 'javascript:alert(1)',
+      bannerLinkUrl: 'javascript:alert(1)',
+    });
+    assert.equal(rejected.bannerImageUrl, '');
+    assert.equal(rejected.bannerLinkUrl, '');
+
+    const pixel = withCustom.html.match(/src="(https:\/\/brew\.example\.com\/public\/open\/[^"]+)"/)[1];
+    const pixelUrl = new URL(pixel);
+    const parts = pixelUrl.pathname.split('/');
+    const campaignId = parts[4];
+    const leadId = parts[5];
+    assert.equal(campaignId, custom.id);
+    assert.equal(leadId, lead.id);
+    assert.equal(email.verifyOpen(org.id, campaignId, leadId, pixelUrl.searchParams.get('sig')), true);
+    assert.equal(email.verifyOpen(org.id, campaignId, leadId, 'forged'), false);
+
+    assert.equal(await email.recordOpen(campaignId, leadId), true);
+    assert.equal(await email.recordOpen(campaignId, leadId), true);
+    const details = await email.campaignDetails(campaignId);
+    assert.equal(details.campaign.stats.opens, 1);
+    assert.equal(details.campaign.stats.openCount, 2);
+
+    // Test-send lead ids must not corrupt real open stats.
+    assert.equal(await email.recordOpen(campaignId, '0'.repeat(16)), false);
+    assert.equal((await email.campaignDetails(campaignId)).campaign.stats.opens, 1);
   });
 });
 

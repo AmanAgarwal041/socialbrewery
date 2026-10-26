@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { CircleAlert, FileUp, Loader2, Mail, MailCheck, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
+import { CircleAlert, FileUp, ImagePlus, Loader2, Mail, MailCheck, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { AssistantTabs } from '@/components/assistant-tabs'
 import { CopyField, EmptyState, PageHeader, Stat } from '@/components/common'
@@ -67,12 +67,22 @@ function merge(template: string, lead: Partial<Lead>) {
   })
 }
 
-// The preview shows the same light formatting the email gets: **bold**, [label](url), and bare links.
+const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise'
+const DEFAULT_BANNER_LINK = 'https://openlit.io'
+const defaultBannerImageUrl = () => `${window.location.origin}/email/openlit-enterprise-banner.jpg`
+
+// The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
 function Formatted({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<)]+)/g)
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<)]+)/g)
   return (
     <>
       {parts.map((part, i) => {
+        const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(part)
+        if (image) {
+          const src = /^https?:\/\//i.test(image[2].trim()) ? image[2].trim() : ''
+          if (!src) return null
+          return <img key={i} src={src} alt={image[1]} className="my-2 max-w-full rounded-md" />
+        }
         const bold = /^\*\*([^*]+)\*\*$/.exec(part)
         if (bold) return <strong key={i}>{bold[1]}</strong>
         const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part)
@@ -147,8 +157,8 @@ function SetupNotice({ status }: { status: EmailStatus }) {
       {!status.publicLinks && (
         <Alert>
           <CircleAlert />
-          <AlertTitle>Unsubscribe links need a public address</AlertTitle>
-          <AlertDescription>APP_URL points at this computer, so the unsubscribe links in your emails won’t open for recipients. Deploy, or set APP_URL to a public https URL.</AlertDescription>
+          <AlertTitle>Public links need a public address</AlertTitle>
+          <AlertDescription>APP_URL points at this computer, so unsubscribe links, open tracking, and banner images in your emails won’t work for recipients. Deploy, or set APP_URL to a public https URL.</AlertDescription>
         </Alert>
       )}
       {status.ready && !status.webhookSet && canManage && status.webhookUrl && (
@@ -545,6 +555,7 @@ export function EmailCampaignsPage() {
               {c.status !== 'draft' && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {c.stats.sent} sent{c.stats.failed ? ` · ${c.stats.failed} failed` : ''}
+                  {c.stats.opens ? ` · ${c.stats.opens} opened` : ''}
                   {c.audienceTags.length ? ` · tags: ${c.audienceTags.join(', ')}` : ''}
                 </p>
               )}
@@ -565,7 +576,15 @@ export function EmailCampaignPage() {
   const assistant = useAssistant(health)
   const { status, leads } = useEmail()
   const [details, setDetails] = useState<Details | null>(null)
-  const [form, setForm] = useState({ name: '', subject: '', body: '', tags: '' })
+  const [form, setForm] = useState({
+    name: '',
+    subject: '',
+    body: '',
+    tags: '',
+    bannerEnabled: false,
+    bannerImageUrl: '',
+    bannerLinkUrl: '',
+  })
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [brief, setBrief] = useState('')
@@ -575,11 +594,20 @@ export function EmailCampaignPage() {
   const [confirmSend, setConfirmSend] = useState(false)
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
 
   const load = useCallback(async () => {
     const data = await api<Details>(`/api/email/campaigns/${id}`)
     setDetails(data)
-    setForm({ name: data.campaign.name, subject: data.campaign.subject, body: data.campaign.body, tags: data.campaign.audienceTags.join(', ') })
+    setForm({
+      name: data.campaign.name,
+      subject: data.campaign.subject,
+      body: data.campaign.body,
+      tags: data.campaign.audienceTags.join(', '),
+      bannerEnabled: Boolean(data.campaign.bannerEnabled),
+      bannerImageUrl: data.campaign.bannerImageUrl || '',
+      bannerLinkUrl: data.campaign.bannerLinkUrl || '',
+    })
     setDirty(false)
   }, [id])
 
@@ -590,16 +618,42 @@ export function EmailCampaignPage() {
   const editable = details?.campaign.status === 'draft'
   const audienceTags = splitTags(form.tags)
   const audience = (leads || []).filter((l) => l.status === 'subscribed' && (!audienceTags.length || l.tags.some((t) => audienceTags.includes(t))))
-  const sample = audience[0] || { firstName: 'Alex', lastName: 'Sample', company: 'Example Co', email: 'alex@example.com' }
-  const set = (key: keyof typeof form, value: string) => {
+  const sample = audience[0] || { firstName: 'Alex', lastName: 'Sample', company: 'Example Co', email: 'alex@example.com', meta: {} }
+  const set = (key: keyof typeof form, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }))
     setDirty(true)
+  }
+
+  function insertImageSnippet() {
+    const snippet = '![{{product_name|OpenLIT}}]({{hero_image|https://example.com/image.png}})\n\n'
+    const el = bodyRef.current
+    if (!el || !editable) {
+      set('body', `${form.body}${form.body && !form.body.endsWith('\n') ? '\n' : ''}${snippet}`)
+      return
+    }
+    const start = el.selectionStart ?? form.body.length
+    const end = el.selectionEnd ?? start
+    const next = `${form.body.slice(0, start)}${snippet}${form.body.slice(end)}`
+    set('body', next)
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + snippet.length
+      el.setSelectionRange(pos, pos)
+    })
   }
 
   async function save() {
     setSaving(true)
     try {
-      await sendJson(`/api/email/campaigns/${id}`, 'PATCH', { name: form.name, subject: form.subject, body: form.body, audienceTags })
+      await sendJson(`/api/email/campaigns/${id}`, 'PATCH', {
+        name: form.name,
+        subject: form.subject,
+        body: form.body,
+        audienceTags,
+        bannerEnabled: form.bannerEnabled,
+        bannerImageUrl: form.bannerImageUrl,
+        bannerLinkUrl: form.bannerLinkUrl,
+      })
       await load()
       return true
     } catch (err) {
@@ -692,7 +746,7 @@ export function EmailCampaignPage() {
         description={
           editable
             ? `${audience.length} subscribed ${audience.length === 1 ? 'person' : 'people'} will get this${audienceTags.length ? ` (tags: ${audienceTags.join(', ')})` : ''}.`
-            : `${c.stats.sent} sent${c.stats.failed ? `, ${c.stats.failed} failed` : ''}${c.sentAt ? ` · finished ${timeAgo(c.sentAt)}` : ''}.`
+            : `${c.stats.sent} sent${c.stats.failed ? `, ${c.stats.failed} failed` : ''}${c.stats.opens ? `, ${c.stats.opens} opened` : ''}${c.sentAt ? ` · finished ${timeAgo(c.sentAt)}` : ''}.`
         }
         actions={
           <>
@@ -759,9 +813,17 @@ export function EmailCampaignPage() {
                 <Input id="c-subject" value={form.subject} disabled={!editable} onChange={(e) => set('subject', e.target.value)} placeholder="A quick update for {{first_name|you}}" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="c-body">Email</Label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="c-body">Email</Label>
+                  {editable && (
+                    <Button type="button" size="sm" variant="outline" onClick={insertImageSnippet}>
+                      <ImagePlus /> Insert image
+                    </Button>
+                  )}
+                </div>
                 <Textarea
                   id="c-body"
+                  ref={bodyRef}
                   rows={12}
                   value={form.body}
                   disabled={!editable}
@@ -772,9 +834,60 @@ export function EmailCampaignPage() {
                 <p className="text-xs text-muted-foreground">
                   Merge fields: <code>{'{{first_name}}'}</code>, <code>{'{{last_name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{email}}'}</code>, plus any CSV
                   column as <code>{'{{column_name}}'}</code> (e.g. <code>{'{{subject}}'}</code>); add a fallback like <code>{'{{first_name|there}}'}</code>. Unknown tags
-                  stay as written. **bold**, [link](https://…) and blank lines between paragraphs work. Your postal address and an unsubscribe link are added at the
-                  bottom.
+                  stay as written. Images: <code>![alt](https://…)</code> or merge-bound{' '}
+                  <code>{'![{{product_name}}]({{hero_image|https://fallback}})'}</code> (http/https only; empty URLs are skipped). **bold**, [link](https://…) and blank
+                  lines between paragraphs work. Your postal address and an unsubscribe link are added at the bottom.
                 </p>
+              </div>
+              <div className="space-y-3 rounded-xl border p-3">
+                <label className="flex items-start gap-3 text-sm">
+                  <Switch
+                    checked={form.bannerEnabled}
+                    disabled={!editable}
+                    onCheckedChange={(v) => {
+                      setForm((f) => ({
+                        ...f,
+                        bannerEnabled: v,
+                        // Keep image blank to use the built-in OpenLIT asset from APP_URL at send time.
+                        bannerLinkUrl: v && !f.bannerLinkUrl ? DEFAULT_BANNER_LINK : f.bannerLinkUrl,
+                      }))
+                      setDirty(true)
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium">OpenLIT Enterprise header banner</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Places the banner above the body. Leave the image URL blank to use the built-in asset; link defaults to openlit.io.
+                    </span>
+                  </span>
+                </label>
+                {form.bannerEnabled && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label htmlFor="c-banner-image">Banner image URL</Label>
+                      <Input
+                        id="c-banner-image"
+                        type="url"
+                        value={form.bannerImageUrl}
+                        disabled={!editable}
+                        onChange={(e) => set('bannerImageUrl', e.target.value)}
+                        placeholder={defaultBannerImageUrl()}
+                      />
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label htmlFor="c-banner-link">Banner link URL</Label>
+                      <Input
+                        id="c-banner-link"
+                        type="url"
+                        value={form.bannerLinkUrl}
+                        disabled={!editable}
+                        onChange={(e) => set('bannerLinkUrl', e.target.value)}
+                        placeholder={DEFAULT_BANNER_LINK}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="c-tags">Send to tags</Label>
@@ -811,8 +924,19 @@ export function EmailCampaignPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <p className="font-medium">{merge(form.subject, sample) || <span className="text-muted-foreground">No subject</span>}</p>
-              <div className="rounded-xl border bg-background p-3 whitespace-pre-wrap">{form.body ? <Formatted text={merge(form.body, sample)} /> : <span className="text-muted-foreground">Nothing written yet.</span>}</div>
-              <p className="text-xs text-muted-foreground">+ your postal address and an unsubscribe link</p>
+              <div className="rounded-xl border bg-background p-3 whitespace-pre-wrap">
+                {form.bannerEnabled && (
+                  <a href={form.bannerLinkUrl || DEFAULT_BANNER_LINK} target="_blank" rel="noreferrer" className="mb-3 block">
+                    <img
+                      src={form.bannerImageUrl || defaultBannerImageUrl()}
+                      alt={DEFAULT_BANNER_ALT}
+                      className="w-full rounded-md"
+                    />
+                  </a>
+                )}
+                {form.body ? <Formatted text={merge(form.body, sample)} /> : <span className="text-muted-foreground">Nothing written yet.</span>}
+              </div>
+              <p className="text-xs text-muted-foreground">+ your postal address, unsubscribe link, and open-tracking pixel</p>
             </CardContent>
           </Card>
           {canManage && (
