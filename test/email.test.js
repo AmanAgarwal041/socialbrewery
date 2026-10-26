@@ -337,6 +337,61 @@ test('test sends go to one address and never carry a real lead’s unsubscribe l
     assert.deepEqual(calls[0].body.to, ['me@acme.com']);
     assert.equal(calls[0].body.subject, '[Test] Hi Real');
     assert.equal(calls[0].body.html.includes(lead.id), false);
+    // Draft test: still draft, not counted in blast stats, and unsubscribe is a dead test lead id.
+    const after = await email.getCampaign(campaign.id);
+    assert.equal(after.status, 'draft');
+    assert.deepEqual(after.stats, { sent: 0, failed: 0, opens: 0, openCount: 0 });
+    const analytics = await email.campaignAnalytics(campaign.id);
+    assert.equal(analytics.sent, 0);
+    assert.equal(analytics.uniqueOpens, 0);
+    assert.equal(analytics.openRate, null);
+    assert.match(calls[0].body.html, /\/public\/unsubscribe\/[^/]+\/0{16}/);
+    await assert.rejects(email.sendTest(campaign.id, 'not-an-email'), /Enter the address/);
+  });
+});
+
+test('campaign analytics aggregates delivery, open rate, and the open log', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    const a = await email.addLead({ email: 'a@x.com', firstName: 'Ada' });
+    const b = await email.addLead({ email: 'b@x.com', firstName: 'Bob' });
+    await email.addLead({ email: 'c@x.com', firstName: 'Cy' });
+    const campaign = await email.saveCampaign('', { subject: 'News', body: 'Hello' });
+
+    // Draft zeros before any send.
+    const empty = await email.campaignAnalytics(campaign.id);
+    assert.equal(empty.sent, 0);
+    assert.equal(empty.failed, 0);
+    assert.equal(empty.remaining, 3);
+    assert.equal(empty.uniqueOpens, 0);
+    assert.equal(empty.openEvents, 0);
+    assert.equal(empty.openRate, null);
+    assert.deepEqual(empty.opens, []);
+    assert.equal((await email.campaignDetails(campaign.id)).analytics.openRate, null);
+
+    mockResend();
+    const sent = await email.sendCampaignChunk(campaign.id);
+    assert.equal(sent.sentNow, 3);
+    await email.recordOpen(campaign.id, a.id);
+    await email.recordOpen(campaign.id, a.id);
+    await email.recordOpen(campaign.id, b.id);
+
+    const analytics = await email.campaignAnalytics(campaign.id);
+    assert.equal(analytics.sent, 3);
+    assert.equal(analytics.failed, 0);
+    assert.equal(analytics.remaining, 0);
+    assert.equal(analytics.uniqueOpens, 2);
+    assert.equal(analytics.openEvents, 3);
+    assert.equal(analytics.openRate, 66.7);
+    assert.equal(analytics.opens.length, 2);
+    assert.ok(analytics.opens.every((row) => row.email && row.firstOpenedAt && row.lastOpenedAt && row.openCount >= 1));
+    const ada = analytics.opens.find((row) => row.email === 'a@x.com');
+    assert.equal(ada.openCount, 2);
+
+    const details = await email.campaignDetails(campaign.id);
+    assert.equal(details.analytics.uniqueOpens, 2);
+    assert.equal(details.analytics.openRate, 66.7);
+    assert.equal(details.campaign.stats.opens, 2);
+    assert.equal(details.campaign.stats.openCount, 3);
   });
 });
 

@@ -23,6 +23,7 @@ import {
   DRAFT_SYSTEM,
   addLead,
   applyResendEvent,
+  campaignAnalytics,
   campaignDetails,
   deleteCampaign,
   deleteLeads,
@@ -1371,7 +1372,7 @@ function listen(server, host, port) {
 async function emailRoute(req, res, pathname, ctx) {
   const admin = () => requireRole(ctx, 'admin');
   const lead = pathname.match(/^\/api\/email\/leads\/([a-f0-9]{16})$/);
-  const campaign = pathname.match(/^\/api\/email\/campaigns\/([a-f0-9]{16})(?:\/(send|retry|test|banner))?$/);
+  const campaign = pathname.match(/^\/api\/email\/campaigns\/([a-f0-9]{16})(?:\/(send|retry|test|banner|analytics))?$/);
 
   if (req.method === 'GET' && pathname === '/api/email/status') {
     const leads = await listLeads();
@@ -1431,6 +1432,9 @@ async function emailRoute(req, res, pathname, ctx) {
     admin();
     const body = await readJsonBody(req);
     return sendJson(res, 200, await sendTest(campaign[1], body.to));
+  }
+  if (req.method === 'GET' && campaign?.[2] === 'analytics') {
+    return sendJson(res, 200, await campaignAnalytics(campaign[1]));
   }
   if (campaign?.[2] === 'banner') {
     if (req.method === 'GET') {

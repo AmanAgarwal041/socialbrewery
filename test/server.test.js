@@ -244,6 +244,16 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     const afterOpen = await fetch(`${base}/api/email/campaigns/${campaignId}`, as(adminToken)).then((res) => res.json());
     assert.equal(afterOpen.campaign.stats.opens, 1);
     assert.equal(afterOpen.campaign.stats.openCount, 1);
+    assert.equal(afterOpen.analytics.uniqueOpens, 1);
+    assert.equal(afterOpen.analytics.openEvents, 1);
+    assert.equal(afterOpen.analytics.openRate, null, 'open rate stays null until the campaign has sent recipients');
+    assert.equal(afterOpen.analytics.opens[0].email, 'open@example.com');
+    const analyticsOnly = await fetch(`${base}/api/email/campaigns/${campaignId}/analytics`, as(adminToken)).then((res) => res.json());
+    assert.equal(analyticsOnly.uniqueOpens, 1);
+    assert.equal(analyticsOnly.opens[0].email, 'open@example.com');
+    // Members can read analytics; only admins can send a test.
+    assert.equal((await fetch(`${base}/api/email/campaigns/${campaignId}/analytics`, as(memberToken))).status, 200);
+    assert.equal((await fetch(`${base}/api/email/campaigns/${campaignId}/test`, as(memberToken, { method: 'POST', body: JSON.stringify({ to: 'me@example.com' }) }))).status, 403);
 
     // Connecting a network: the callback can arrive after the Clerk token expired, so the connect step
     // leaves a signed ticket for that organisation. Without it, a callback is not signed in.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { CircleAlert, FileUp, ImagePlus, Loader2, Mail, MailCheck, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
+import { BarChart3, CircleAlert, Eye, FileUp, ImagePlus, Loader2, Mail, MailCheck, MailX, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { AssistantTabs } from '@/components/assistant-tabs'
 import { CopyField, EmptyState, PageHeader, Stat } from '@/components/common'
@@ -26,7 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { api, postJson, sendJson, timeAgo, uploadCampaignBanner, type Campaign, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
+import { api, postJson, sendJson, timeAgo, uploadCampaignBanner, type Campaign, type CampaignAnalytics, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { useAssistant } from '@/lib/assistant'
 import { cn } from '@/lib/utils'
@@ -563,7 +563,90 @@ export function EmailCampaignsPage() {
   )
 }
 
-type Details = { campaign: Campaign; audience: number; remaining: number; failures: { email: string; error: string }[] }
+type Details = {
+  campaign: Campaign
+  audience: number
+  remaining: number
+  failures: { email: string; error: string }[]
+  analytics?: CampaignAnalytics
+}
+
+function CampaignAnalyticsPanel({
+  analytics,
+  fallbackStats,
+  remaining,
+}: {
+  analytics?: CampaignAnalytics
+  fallbackStats: Campaign['stats']
+  remaining: number
+}) {
+  const sent = analytics?.sent ?? fallbackStats.sent ?? 0
+  const failed = analytics?.failed ?? fallbackStats.failed ?? 0
+  const left = analytics?.remaining ?? remaining
+  const uniqueOpens = analytics?.uniqueOpens ?? fallbackStats.opens ?? 0
+  const openEvents = analytics?.openEvents ?? fallbackStats.openCount ?? 0
+  const openRate = analytics?.openRate ?? (sent > 0 ? Math.round((uniqueOpens / sent) * 1000) / 10 : null)
+  const opens = analytics?.opens ?? []
+
+  return (
+    <Card className="mb-4">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <BarChart3 className="size-4" /> Campaign analytics
+        </CardTitle>
+        <CardDescription>
+          Delivery and open tracking for this campaign. Opens use the tracking pixel; unique opens count each recipient once.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <Stat label="Sent" value={sent} icon={Send} tone="p3" hint={sent === 0 ? 'Nothing sent yet' : undefined} />
+          <Stat label="Failed" value={failed} icon={MailX} tone="p1" hint={failed ? 'See failures above' : 'No delivery failures'} />
+          <Stat label="Remaining" value={left} icon={Users} tone="p2" hint={left === 0 ? 'Audience fully processed' : 'Still to send'} />
+          <Stat label="Unique opens" value={uniqueOpens} icon={Eye} tone="p4" hint={uniqueOpens === 0 ? 'No opens recorded yet' : undefined} />
+          <Stat label="Open events" value={openEvents} icon={MailCheck} tone="p4" hint="Includes repeat opens" />
+          <Stat
+            label="Open rate"
+            value={openRate == null ? '—' : `${openRate}%`}
+            icon={BarChart3}
+            tone="p3"
+            hint={openRate == null ? 'Available after the first send' : 'Unique opens ÷ sent'}
+          />
+        </div>
+        {opens.length === 0 ? (
+          <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+            {sent === 0 ? 'Send the campaign (or wait for opens) to see who opened it here.' : 'No opens recorded yet for this campaign.'}
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>First open</TableHead>
+                  <TableHead className="hidden sm:table-cell">Last open</TableHead>
+                  <TableHead className="w-24 text-right">Opens</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {opens.map((row) => (
+                  <TableRow key={row.email}>
+                    <TableCell className="font-medium">{row.email}</TableCell>
+                    <TableCell className="text-muted-foreground">{row.firstOpenedAt ? timeAgo(row.firstOpenedAt) : '—'}</TableCell>
+                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                      {row.lastOpenedAt ? timeAgo(row.lastOpenedAt) : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{row.openCount}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 export function EmailCampaignPage() {
   const { id = '' } = useParams()
@@ -828,6 +911,8 @@ export function EmailCampaignPage() {
         </Alert>
       )}
 
+      <CampaignAnalyticsPanel analytics={details.analytics} fallbackStats={c.stats} remaining={details.remaining} />
+
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
           <Card>
@@ -1012,6 +1097,9 @@ export function EmailCampaignPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Send a test</CardTitle>
+                <CardDescription>
+                  Sends this campaign’s current subject, body, and banner to one address. Works while the campaign is still a draft.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <form
@@ -1022,12 +1110,14 @@ export function EmailCampaignPage() {
                   }}
                 >
                   <Input type="email" required value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@company.com" aria-label="Test address" />
-                  <Button type="submit" variant="outline" disabled={testing || !status?.ready}>
+                  <Button type="submit" variant="outline" disabled={testing || !status?.ready || !form.subject.trim() || !form.body.trim()}>
                     {testing ? <Loader2 className="animate-spin" /> : <Mail />} Test
                   </Button>
                 </form>
               </CardContent>
-              <CardFooter className="text-xs text-muted-foreground">The test uses a real lead’s merge fields; its unsubscribe link doesn’t affect anyone.</CardFooter>
+              <CardFooter className="text-xs text-muted-foreground">
+                Uses a subscribed lead’s merge fields when available (otherwise sample values). Does not count toward campaign stats; the unsubscribe link does not affect real leads.
+              </CardFooter>
             </Card>
           )}
         </div>
