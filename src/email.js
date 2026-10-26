@@ -5,7 +5,7 @@ import { cfg, currentContext, orgDataDir } from './context.js';
 import { readJson, updateJson } from './store.js';
 import { safeEqual, sha256, sign, verifySignature } from './secure.js';
 import { connectSmtp, validateSmtp } from './smtp.js';
-import { onWorkers } from './storage.js';
+import { blobSize, onWorkers, readBlobRange, removeEntry, writeBlob } from './storage.js';
 
 // Leads and email campaigns, sent with the organisation's own Resend account or SMTP server.
 //
@@ -38,12 +38,20 @@ const files = {
   campaigns: () => path.join(orgDataDir(), 'email-campaigns.json'),
   log: (id) => path.join(orgDataDir(), `email-log-${id}.json`),
   opens: (id) => path.join(orgDataDir(), `email-opens-${id}.json`),
+  // Banner bytes live outside the campaigns JSON so D1 documents stay small; same writeBlob
+  // path used for media (files locally, R2 or D1 pieces on Workers).
+  banner: (campaignId) => path.join(orgDataDir(), 'email-banners', campaignId),
 };
 
-// Default OpenLIT Enterprise header (served from /email/… via the static dashboard assets).
-export const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise';
-export const DEFAULT_BANNER_LINK = 'https://openlit.io';
-export const defaultBannerImageUrl = () => `${appUrl()}/email/openlit-enterprise-banner.png`;
+// Uploaded campaign banners: kept small enough for email clients and D1 piece storage.
+export const BANNER_MAX_BYTES = 750_000;
+export const BANNER_MIMES = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
 
 // 1×1 transparent GIF for open tracking (always returned, even for bad signatures).
 export const TRACKING_PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -384,6 +392,11 @@ function cleanHttpUrl(value, max = 2000) {
   }
 }
 
+/** Banner URL/link templates may include {{merge}} fields; validate http(s) only after merge. */
+function bannerTemplate(value, max = 2000) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
 function campaignFields(fields, base = {}) {
   const bannerEnabled =
     fields.bannerEnabled !== undefined ? Boolean(fields.bannerEnabled) : base.bannerEnabled === true;
@@ -395,13 +408,11 @@ function campaignFields(fields, base = {}) {
     audienceTags: fields.audienceTags !== undefined ? cleanTags(fields.audienceTags) : base.audienceTags || [],
     bannerEnabled,
     bannerImageUrl:
-      fields.bannerImageUrl !== undefined
-        ? cleanHttpUrl(fields.bannerImageUrl)
-        : cleanHttpUrl(base.bannerImageUrl || ''),
+      fields.bannerImageUrl !== undefined ? bannerTemplate(fields.bannerImageUrl) : bannerTemplate(base.bannerImageUrl || ''),
     bannerLinkUrl:
-      fields.bannerLinkUrl !== undefined
-        ? cleanHttpUrl(fields.bannerLinkUrl)
-        : cleanHttpUrl(base.bannerLinkUrl || ''),
+      fields.bannerLinkUrl !== undefined ? bannerTemplate(fields.bannerLinkUrl) : bannerTemplate(base.bannerLinkUrl || ''),
+    bannerAssetId: isEmailId(base.bannerAssetId) ? base.bannerAssetId : '',
+    bannerMime: BANNER_MIMES[base.bannerMime] ? base.bannerMime : '',
   };
 }
 
@@ -438,6 +449,70 @@ export async function saveCampaign(id, fields) {
 
 export async function deleteCampaign(id) {
   await updateJson(files.campaigns(), [], (campaigns) => (Array.isArray(campaigns) ? campaigns : []).filter((c) => c.id !== id));
+  await removeEntry(files.banner(id)).catch(() => null);
+}
+
+function bannerPayload(orgId, campaignId, assetId) {
+  return `email-banner:${orgId}:${campaignId}:${assetId}`;
+}
+
+export function bannerPublicUrl(orgId, campaignId, assetId) {
+  return `${appUrl()}/public/email-banner/${orgId}/${campaignId}/${assetId}?sig=${sign(bannerPayload(orgId, campaignId, assetId))}`;
+}
+
+export function verifyBanner(orgId, campaignId, assetId, sig) {
+  return isEmailId(campaignId) && isEmailId(assetId) && verifySignature(bannerPayload(orgId, campaignId, assetId), sig);
+}
+
+export async function uploadCampaignBanner(id, buffer, mimeType) {
+  const campaign = await getCampaign(id);
+  if (!campaign) throw fail('That campaign is gone.', 404);
+  if (campaign.status !== 'draft') throw fail('This campaign has started sending, so it can’t be edited. Duplicate it instead.', 409);
+  const mime = String(mimeType || '').toLowerCase().split(';')[0].trim();
+  if (!BANNER_MIMES[mime]) throw fail('Use a PNG, JPEG, WebP, or GIF image for the banner.');
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw fail('That image file is empty.');
+  if (buffer.length > BANNER_MAX_BYTES) {
+    throw fail(`Banner images must be ${Math.floor(BANNER_MAX_BYTES / 1024)} KB or smaller.`, 413);
+  }
+  const assetId = newId();
+  await writeBlob(files.banner(id), buffer, { mime });
+  let saved;
+  await updateJson(files.campaigns(), [], (list) =>
+    list.map((c) => {
+      if (c.id !== id) return c;
+      saved = { ...c, bannerAssetId: assetId, bannerMime: mime === 'image/jpg' ? 'image/jpeg' : mime, updatedAt: now() };
+      return saved;
+    }),
+  );
+  if (!saved) throw fail('That campaign is gone.', 404);
+  return saved;
+}
+
+export async function clearCampaignBanner(id) {
+  const campaign = await getCampaign(id);
+  if (!campaign) throw fail('That campaign is gone.', 404);
+  if (campaign.status !== 'draft') throw fail('This campaign has started sending, so it can’t be edited. Duplicate it instead.', 409);
+  await removeEntry(files.banner(id)).catch(() => null);
+  let saved;
+  await updateJson(files.campaigns(), [], (list) =>
+    list.map((c) => {
+      if (c.id !== id) return c;
+      saved = { ...c, bannerAssetId: '', bannerMime: '', updatedAt: now() };
+      return saved;
+    }),
+  );
+  if (!saved) throw fail('That campaign is gone.', 404);
+  return saved;
+}
+
+/** Returns { mime, buffer } for an uploaded banner, or null. */
+export async function readCampaignBanner(id) {
+  const campaign = await getCampaign(id);
+  if (!campaign?.bannerAssetId || !campaign.bannerMime) return null;
+  const size = await blobSize(files.banner(id));
+  if (size == null || size <= 0) return null;
+  const buffer = await readBlobRange(files.banner(id), 0, size - 1);
+  return { mime: campaign.bannerMime, buffer, assetId: campaign.bannerAssetId, bytes: size };
 }
 
 function audienceOf(campaign, leads) {
@@ -573,12 +648,23 @@ export function bodyHtml(body) {
     .join('\n');
 }
 
-function bannerHtml(campaign) {
+function bannerSrc(campaign, lead) {
+  // External / merge URL wins when it resolves; otherwise use the uploaded asset's public URL.
+  const fromUrl = safeImageSrc(merge(campaign.bannerImageUrl || '', lead));
+  if (fromUrl) return fromUrl;
+  const ctx = currentContext();
+  if (campaign.bannerAssetId && isEmailId(campaign.bannerAssetId) && ctx?.org?.id) {
+    return escapeHtml(bannerPublicUrl(ctx.org.id, campaign.id, campaign.bannerAssetId));
+  }
+  return '';
+}
+
+function bannerHtml(campaign, lead) {
   if (!campaign?.bannerEnabled) return '';
-  const src = safeImageSrc(campaign.bannerImageUrl) || safeImageSrc(defaultBannerImageUrl());
+  const src = bannerSrc(campaign, lead);
   if (!src) return '';
-  const href = cleanHttpUrl(campaign.bannerLinkUrl) || DEFAULT_BANNER_LINK;
-  const alt = escapeHtml(DEFAULT_BANNER_ALT);
+  const href = cleanHttpUrl(merge(campaign.bannerLinkUrl || '', lead));
+  const alt = escapeHtml(text(campaign.name, 80) || 'Email banner');
   const img = `<img src="${src}" alt="${alt}" width="600" style="${IMG_STYLE};width:100%;max-width:600px" />`;
   const inner = href
     ? `<a href="${escapeHtml(href)}" style="text-decoration:none;border:0">${img}</a>`
@@ -622,7 +708,7 @@ export function renderEmail(campaign, lead) {
   const pixel = trackingPixelHtml(ctx.org.id, campaign.id, lead.id);
   const html = `<!doctype html><html><body style="margin:0;padding:24px;font:16px/1.55 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1a2e">
 <div style="max-width:600px;margin:0 auto">
-${bannerHtml(campaign)}
+${bannerHtml(campaign, lead)}
 ${bodyHtml(body)}
 <hr style="border:0;border-top:1px solid #e5e5ef;margin:28px 0 12px">
 <p style="margin:0;font-size:12px;color:#77778a">${escapeHtml(postal)}<br>You’re receiving this because you’re on ${escapeHtml(orgName)}’s list. <a href="${unsubscribe}" style="color:#77778a">Unsubscribe</a></p>

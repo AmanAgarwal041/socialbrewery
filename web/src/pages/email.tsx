@@ -26,7 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { api, postJson, sendJson, timeAgo, type Campaign, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
+import { api, postJson, sendJson, timeAgo, uploadCampaignBanner, type Campaign, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { useAssistant } from '@/lib/assistant'
 import { cn } from '@/lib/utils'
@@ -66,10 +66,6 @@ function merge(template: string, lead: Partial<Lead>) {
     return values[k] || (fallback ?? '').trim()
   })
 }
-
-const DEFAULT_BANNER_ALT = 'OpenLIT Enterprise'
-const DEFAULT_BANNER_LINK = 'https://openlit.io'
-const defaultBannerImageUrl = () => `${window.location.origin}/email/openlit-enterprise-banner.png`
 
 // The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
 function Formatted({ text }: { text: string }) {
@@ -594,7 +590,10 @@ export function EmailCampaignPage() {
   const [confirmSend, setConfirmSend] = useState(false)
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const [bannerPreviewKey, setBannerPreviewKey] = useState(0)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const bannerFileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     const data = await api<Details>(`/api/email/campaigns/${id}`)
@@ -608,6 +607,7 @@ export function EmailCampaignPage() {
       bannerImageUrl: data.campaign.bannerImageUrl || '',
       bannerLinkUrl: data.campaign.bannerLinkUrl || '',
     })
+    setBannerPreviewKey((k) => k + 1)
     setDirty(false)
   }, [id])
 
@@ -624,8 +624,36 @@ export function EmailCampaignPage() {
     setDirty(true)
   }
 
+  async function onBannerFile(file?: File | null) {
+    if (!file || !editable) return
+    setBannerUploading(true)
+    try {
+      const campaign = await uploadCampaignBanner(id, file)
+      setDetails((d) => (d ? { ...d, campaign } : d))
+      setForm((f) => ({ ...f, bannerEnabled: true }))
+      setBannerPreviewKey((k) => k + 1)
+      toast.success('Banner uploaded.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setBannerUploading(false)
+      if (bannerFileRef.current) bannerFileRef.current.value = ''
+    }
+  }
+
+  async function removeBannerUpload() {
+    try {
+      const { campaign } = await sendJson<{ campaign: Campaign }>(`/api/email/campaigns/${id}/banner`, 'DELETE')
+      setDetails((d) => (d ? { ...d, campaign } : d))
+      setBannerPreviewKey((k) => k + 1)
+      toast.success('Uploaded banner removed.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
   function insertImageSnippet() {
-    const snippet = '![{{product_name|OpenLIT}}]({{hero_image|https://example.com/image.png}})\n\n'
+    const snippet = '![{{product_name|Product}}]({{hero_image|https://example.com/image.png}})\n\n'
     const el = bodyRef.current
     if (!el || !editable) {
       set('body', `${form.body}${form.body && !form.body.endsWith('\n') ? '\n' : ''}${snippet}`)
@@ -845,45 +873,76 @@ export function EmailCampaignPage() {
                     checked={form.bannerEnabled}
                     disabled={!editable}
                     onCheckedChange={(v) => {
-                      setForm((f) => ({
-                        ...f,
-                        bannerEnabled: v,
-                        // Keep image blank to use the built-in OpenLIT asset from APP_URL at send time.
-                        bannerLinkUrl: v && !f.bannerLinkUrl ? DEFAULT_BANNER_LINK : f.bannerLinkUrl,
-                      }))
-                      setDirty(true)
+                      set('bannerEnabled', v)
                     }}
                     className="mt-0.5"
                   />
                   <span>
-                    <span className="font-medium">OpenLIT Enterprise header banner</span>
+                    <span className="font-medium">Header banner</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      Places the banner above the body. Leave the image URL blank to use the built-in asset; link defaults to openlit.io.
+                      Places an image above the body. Upload a file (~1200×176 works well) or paste an https image URL. A URL overrides the upload when both are set.
                     </span>
                   </span>
                 </label>
                 {form.bannerEnabled && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <Label htmlFor="c-banner-image">Banner image URL</Label>
+                  <div className="space-y-3">
+                    <input
+                      ref={bannerFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                      hidden
+                      onChange={(e) => void onBannerFile(e.target.files?.[0])}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!editable || bannerUploading}
+                        onClick={() => bannerFileRef.current?.click()}
+                      >
+                        {bannerUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />} Upload image
+                      </Button>
+                      {details?.campaign.bannerAssetId && editable && (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => void removeBannerUpload()}>
+                          <Trash2 /> Remove upload
+                        </Button>
+                      )}
+                      {details?.campaign.bannerAssetId && (
+                        <span className="text-xs text-muted-foreground">Uploaded banner ready</span>
+                      )}
+                    </div>
+                    {(form.bannerImageUrl.trim() || details?.campaign.bannerAssetId) && (
+                      <div className="overflow-hidden rounded-lg border bg-muted/40">
+                        <img
+                          src={
+                            /^https?:\/\//i.test(merge(form.bannerImageUrl, sample).trim())
+                              ? merge(form.bannerImageUrl, sample).trim()
+                              : `/api/email/campaigns/${id}/banner?v=${details?.campaign.bannerAssetId || ''}-${bannerPreviewKey}`
+                          }
+                          alt="Banner preview"
+                          className="max-h-40 w-full object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="c-banner-image">Or image URL (optional override)</Label>
                       <Input
                         id="c-banner-image"
-                        type="url"
                         value={form.bannerImageUrl}
                         disabled={!editable}
                         onChange={(e) => set('bannerImageUrl', e.target.value)}
-                        placeholder={defaultBannerImageUrl()}
+                        placeholder="https://… or {{hero_image|https://…}}"
                       />
                     </div>
-                    <div className="space-y-1.5 sm:col-span-2">
-                      <Label htmlFor="c-banner-link">Banner link URL</Label>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="c-banner-link">Banner link URL (optional)</Label>
                       <Input
                         id="c-banner-link"
-                        type="url"
                         value={form.bannerLinkUrl}
                         disabled={!editable}
                         onChange={(e) => set('bannerLinkUrl', e.target.value)}
-                        placeholder={DEFAULT_BANNER_LINK}
+                        placeholder="https://example.com"
                       />
                     </div>
                   </div>
@@ -925,15 +984,25 @@ export function EmailCampaignPage() {
             <CardContent className="space-y-2 text-sm">
               <p className="font-medium">{merge(form.subject, sample) || <span className="text-muted-foreground">No subject</span>}</p>
               <div className="rounded-xl border bg-background p-3 whitespace-pre-wrap">
-                {form.bannerEnabled && (
-                  <a href={form.bannerLinkUrl || DEFAULT_BANNER_LINK} target="_blank" rel="noreferrer" className="mb-3 block">
-                    <img
-                      src={form.bannerImageUrl || defaultBannerImageUrl()}
-                      alt={DEFAULT_BANNER_ALT}
-                      className="w-full rounded-md"
-                    />
-                  </a>
-                )}
+                {form.bannerEnabled &&
+                  (() => {
+                    const url = merge(form.bannerImageUrl, sample).trim()
+                    const src = /^https?:\/\//i.test(url)
+                      ? url
+                      : details?.campaign.bannerAssetId
+                        ? `/api/email/campaigns/${id}/banner?v=${details.campaign.bannerAssetId}-${bannerPreviewKey}`
+                        : ''
+                    if (!src) return null
+                    const href = merge(form.bannerLinkUrl, sample).trim()
+                    const img = <img src={src} alt="Banner preview" className="mb-3 w-full rounded-md" />
+                    return href && /^https?:\/\//i.test(href) ? (
+                      <a href={href} target="_blank" rel="noreferrer" className="mb-3 block">
+                        {img}
+                      </a>
+                    ) : (
+                      img
+                    )
+                  })()}
                 {form.body ? <Formatted text={merge(form.body, sample)} /> : <span className="text-muted-foreground">Nothing written yet.</span>}
               </div>
               <p className="text-xs text-muted-foreground">+ your postal address, unsubscribe link, and open-tracking pixel</p>

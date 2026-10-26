@@ -46,6 +46,11 @@ import {
   verifyOpen,
   recordOpen,
   TRACKING_PIXEL,
+  BANNER_MAX_BYTES,
+  verifyBanner,
+  uploadCampaignBanner,
+  clearCampaignBanner,
+  readCampaignBanner,
 } from './email.js';
 import { sign, verifySignature } from './secure.js';
 import { AGENT_PROVIDERS, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
@@ -591,6 +596,26 @@ async function route(req, res) {
       'Referrer-Policy': 'no-referrer',
     });
     res.end(TRACKING_PIXEL);
+    return;
+  }
+
+  // Uploaded campaign banner for recipients (signed; no auth cookies).
+  const bannerHit = pathname.match(/^\/public\/email-banner\/([a-f0-9]{24})\/([a-f0-9]{16})\/([a-f0-9]{16})$/);
+  if (req.method === 'GET' && bannerHit) {
+    const [, orgId, campaignId, assetId] = bannerHit;
+    if (!verifyBanner(orgId, campaignId, assetId, url.searchParams.get('sig'))) throw fail('That banner link is not valid.', 404);
+    const org = await getOrg(orgId);
+    if (!org) throw fail('Not found.', 404);
+    const file = await runWithOrg(await orgContext(org, 'member', null), () => readCampaignBanner(campaignId));
+    if (!file || file.assetId !== assetId) throw fail('That banner is gone.', 404);
+    res.writeHead(200, {
+      'Content-Type': file.mime,
+      'Content-Length': file.buffer.length,
+      'Cache-Control': 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    });
+    res.end(file.buffer);
     return;
   }
 
@@ -1346,7 +1371,7 @@ function listen(server, host, port) {
 async function emailRoute(req, res, pathname, ctx) {
   const admin = () => requireRole(ctx, 'admin');
   const lead = pathname.match(/^\/api\/email\/leads\/([a-f0-9]{16})$/);
-  const campaign = pathname.match(/^\/api\/email\/campaigns\/([a-f0-9]{16})(?:\/(send|retry|test))?$/);
+  const campaign = pathname.match(/^\/api\/email\/campaigns\/([a-f0-9]{16})(?:\/(send|retry|test|banner))?$/);
 
   if (req.method === 'GET' && pathname === '/api/email/status') {
     const leads = await listLeads();
@@ -1406,6 +1431,30 @@ async function emailRoute(req, res, pathname, ctx) {
     admin();
     const body = await readJsonBody(req);
     return sendJson(res, 200, await sendTest(campaign[1], body.to));
+  }
+  if (campaign?.[2] === 'banner') {
+    if (req.method === 'GET') {
+      const file = await readCampaignBanner(campaign[1]);
+      if (!file) throw fail('No banner uploaded for this campaign.', 404);
+      res.writeHead(200, {
+        'Content-Type': file.mime,
+        'Content-Length': file.buffer.length,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(file.buffer);
+      return;
+    }
+    if (req.method === 'POST') {
+      admin();
+      const buffer = await readBody(req, BANNER_MAX_BYTES);
+      const mime = req.headers['content-type'] || '';
+      return sendJson(res, 200, { campaign: await uploadCampaignBanner(campaign[1], buffer, mime) });
+    }
+    if (req.method === 'DELETE') {
+      admin();
+      return sendJson(res, 200, { campaign: await clearCampaignBanner(campaign[1]) });
+    }
   }
 
   // A first draft from Grok or Claude, from a short brief.

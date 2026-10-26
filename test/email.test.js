@@ -118,55 +118,78 @@ test('markdown images merge URLs/alts, reject unsafe schemes, and skip empty src
   });
 });
 
-test('campaign banner can be toggled and overridden; open pixels are signed and recorded', async () => {
+test('campaign banners upload to org storage, URL override wins, and open pixels are signed', async () => {
   await inNewOrg(SETTINGS, async (org) => {
     const lead = await email.addLead({ email: 'ada@x.com', firstName: 'Ada' });
-    const off = await email.saveCampaign('', { subject: 'S', body: 'Hello' });
-    const without = email.renderEmail(off, lead);
-    assert.doesNotMatch(without.html, /openlit-enterprise-banner/);
-    assert.doesNotMatch(without.html, /OpenLIT Enterprise/);
+    const draft = await email.saveCampaign('', { subject: 'S', body: 'Hello' });
+    const without = email.renderEmail(draft, lead);
+    assert.doesNotMatch(without.html, /email-banner|cdn\.example\.com/);
 
-    const on = await email.saveCampaign(off.id, {
-      subject: 'S',
-      body: 'Hello',
-      bannerEnabled: true,
-      bannerImageUrl: '',
-      bannerLinkUrl: '',
-    });
-    assert.equal(on.bannerEnabled, true);
-    const withDefault = email.renderEmail(on, lead);
-    assert.match(withDefault.html, /https:\/\/brew\.example\.com\/email\/openlit-enterprise-banner\.png/);
-    assert.match(withDefault.html, /alt="OpenLIT Enterprise"/);
-    assert.match(withDefault.html, /href="https:\/\/openlit\.io"/);
+    // Enabled with no upload and no URL: omit the banner image.
+    const emptyOn = await email.saveCampaign(draft.id, { subject: 'S', body: 'Hello', bannerEnabled: true });
+    assert.equal(emptyOn.bannerEnabled, true);
+    assert.doesNotMatch(email.renderEmail(emptyOn, lead).html, /<img[^>]+width="600"/);
 
-    const custom = await email.saveCampaign(on.id, {
+    // Tiny 1×1 PNG.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const uploaded = await email.uploadCampaignBanner(draft.id, png, 'image/png');
+    assert.ok(uploaded.bannerAssetId);
+    assert.equal(uploaded.bannerMime, 'image/png');
+    const withUpload = email.renderEmail({ ...uploaded, bannerEnabled: true }, lead);
+    const bannerSrc = withUpload.html.match(/src="(https:\/\/brew\.example\.com\/public\/email-banner\/[^"]+)"/)[1];
+    const bannerUrl = new URL(bannerSrc);
+    assert.equal(email.verifyBanner(org.id, draft.id, uploaded.bannerAssetId, bannerUrl.searchParams.get('sig')), true);
+    assert.equal(email.verifyBanner(org.id, draft.id, uploaded.bannerAssetId, 'forged'), false);
+    const stored = await email.readCampaignBanner(draft.id);
+    assert.equal(stored.mime, 'image/png');
+    assert.deepEqual(stored.buffer, png);
+
+    // External URL overrides the upload when it merges to http(s).
+    const custom = await email.saveCampaign(draft.id, {
       subject: 'S',
       body: 'Hello',
       bannerEnabled: true,
       bannerImageUrl: 'https://cdn.example.com/custom.png',
-      bannerLinkUrl: 'https://openlit.io/enterprise',
+      bannerLinkUrl: 'https://example.com/landing',
     });
+    assert.ok(custom.bannerAssetId, 'upload is kept when setting a URL override');
     const withCustom = email.renderEmail(custom, lead);
     assert.match(withCustom.html, /src="https:\/\/cdn\.example\.com\/custom\.png"/);
-    assert.match(withCustom.html, /href="https:\/\/openlit\.io\/enterprise"/);
+    assert.match(withCustom.html, /href="https:\/\/example\.com\/landing"/);
     assert.doesNotMatch(withCustom.html, /javascript:/i);
 
-    const rejected = await email.saveCampaign(custom.id, {
+    // Merge-bound URL; unsafe schemes are omitted at render time (template may still be stored).
+    const merged = await email.saveCampaign(draft.id, {
       subject: 'S',
       body: 'Hello',
       bannerEnabled: true,
-      bannerImageUrl: 'javascript:alert(1)',
-      bannerLinkUrl: 'javascript:alert(1)',
+      bannerImageUrl: '{{hero_image|https://cdn.example.com/from-meta.png}}',
+      bannerLinkUrl: '{{site|https://example.com}}',
     });
-    assert.equal(rejected.bannerImageUrl, '');
-    assert.equal(rejected.bannerLinkUrl, '');
+    const leadWithMeta = { ...lead, meta: { hero_image: '', site: 'https://example.com/docs' } };
+    const withMerge = email.renderEmail(merged, leadWithMeta);
+    assert.match(withMerge.html, /src="https:\/\/cdn\.example\.com\/from-meta\.png"/);
+    assert.match(withMerge.html, /href="https:\/\/example\.com\/docs"/);
+    const unsafe = email.renderEmail(
+      { ...merged, bannerImageUrl: 'javascript:alert(1)', bannerLinkUrl: 'javascript:alert(1)' },
+      lead,
+    );
+    assert.doesNotMatch(unsafe.html, /javascript:/i);
+    // Falls back to uploaded asset when the URL is unsafe.
+    assert.match(unsafe.html, /\/public\/email-banner\//);
+
+    await email.clearCampaignBanner(draft.id);
+    assert.equal((await email.getCampaign(draft.id)).bannerAssetId, '');
 
     const pixel = withCustom.html.match(/src="(https:\/\/brew\.example\.com\/public\/open\/[^"]+)"/)[1];
     const pixelUrl = new URL(pixel);
     const parts = pixelUrl.pathname.split('/');
     const campaignId = parts[4];
     const leadId = parts[5];
-    assert.equal(campaignId, custom.id);
+    assert.equal(campaignId, draft.id);
     assert.equal(leadId, lead.id);
     assert.equal(email.verifyOpen(org.id, campaignId, leadId, pixelUrl.searchParams.get('sig')), true);
     assert.equal(email.verifyOpen(org.id, campaignId, leadId, 'forged'), false);
@@ -177,7 +200,6 @@ test('campaign banner can be toggled and overridden; open pixels are signed and 
     assert.equal(details.campaign.stats.opens, 1);
     assert.equal(details.campaign.stats.openCount, 2);
 
-    // Test-send lead ids must not corrupt real open stats.
     assert.equal(await email.recordOpen(campaignId, '0'.repeat(16)), false);
     assert.equal((await email.campaignDetails(campaignId)).campaign.stats.opens, 1);
   });
