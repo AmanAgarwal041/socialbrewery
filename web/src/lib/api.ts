@@ -150,6 +150,10 @@ export type Campaign = {
   bannerAssetId?: string
   bannerMime?: string
   status: 'draft' | 'sending' | 'paused' | 'sent'
+  /** Why sending paused: provider_limit (credits/quota) or config (bad key/domain). */
+  pauseReason?: string
+  /** Eligible audience members not yet in the send log (list + detail). */
+  remaining?: number
   createdAt: string
   updatedAt: string
   sentAt: string
@@ -179,7 +183,14 @@ export type EmailStatus = {
   webhookUrl: string
 }
 export type ImportResult = { added: number; updated: number; total: number; skipped: { line: number; reason: string }[] }
-export type SendResult = { status: Campaign['status']; sentNow: number; failedNow: number; remaining: number; stats: Campaign['stats'] }
+export type SendResult = {
+  status: Campaign['status']
+  sentNow: number
+  failedNow: number
+  remaining: number
+  stats: Campaign['stats']
+  pauseReason?: string
+}
 
 export type Post = {
   id: string

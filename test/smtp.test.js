@@ -175,7 +175,10 @@ test('a rejected SMTP login pauses the campaign instead of failing every address
     const campaign = await email.saveCampaign('', { name: 'Launch', subject: 'Hi', body: 'Hello' });
     await assert.rejects(email.sendCampaignChunk(campaign.id), /username or password/);
     const list = await email.listCampaigns();
-    assert.equal(list.find((c) => c.id === campaign.id).status, 'paused');
+    const paused = list.find((c) => c.id === campaign.id);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.pauseReason, 'config');
+    assert.ok((paused.remaining ?? 0) >= 1, 'leftovers stay resumeable after a config pause');
   });
 });
 

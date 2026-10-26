@@ -371,13 +371,33 @@ export async function importLeads({ csv, consent, tags }) {
 
 // ---------- campaigns ----------
 
-export async function listCampaigns() {
+async function readCampaignList() {
   const campaigns = await readJson(files.campaigns(), []);
   return Array.isArray(campaigns) ? campaigns : [];
 }
 
+/**
+ * Campaign list for the dashboard. Includes live `remaining` so unfinished cards can show a
+ * leftover cue without opening each campaign. Drafts use the current audience size.
+ */
+export async function listCampaigns() {
+  const [list, leads] = await Promise.all([readCampaignList(), listLeads()]);
+  const out = [];
+  for (const c of list) {
+    const audience = audienceOf(c, leads);
+    if (c.status === 'draft') {
+      out.push({ ...c, remaining: audience.length });
+      continue;
+    }
+    const log = await readJson(files.log(c.id), {});
+    const remaining = audience.filter((l) => !log[l.email]).length;
+    out.push({ ...c, remaining });
+  }
+  return out;
+}
+
 export async function getCampaign(id) {
-  return (await listCampaigns()).find((c) => c.id === id) || null;
+  return (await readCampaignList()).find((c) => c.id === id) || null;
 }
 
 function cleanHttpUrl(value, max = 2000) {
@@ -594,7 +614,15 @@ export async function campaignDetails(id) {
     failed: campaign.stats?.failed || 0,
   };
   const analytics = buildCampaignAnalytics(campaign, leads, log, opens);
-  return { campaign: { ...campaign, stats }, audience: audience.length, remaining, failures, analytics };
+  return {
+    campaign: { ...campaign, stats, remaining, pauseReason: campaign.pauseReason || '' },
+    audience: audience.length,
+    remaining,
+    unfinished: remaining > 0 && campaign.status !== 'draft',
+    pauseReason: campaign.pauseReason || '',
+    failures,
+    analytics,
+  };
 }
 
 // ---------- rendering ----------
@@ -950,9 +978,76 @@ export async function sendTest(id, to) {
   return { id: data.id || '', to: email };
 }
 
+/** Config problems that should pause the campaign (same failure on every batch until fixed). */
+function isConfigSendError(err) {
+  return err?.status === 400 && /api key|domain|from|verify|smtp|password|cloudflare/i.test(String(err.message || ''));
+}
+
+/**
+ * Provider credit / quota / rate / daily limits — leave unattempted recipients as leftovers so the
+ * user can resume later (e.g. next day). Do not write permanent `failed` log rows for these.
+ */
+export function isProviderLimitError(err) {
+  const status = Number(err?.status) || 0;
+  if (status === 429 || status === 402 || status === 503) return true;
+  const msg = String(err?.message || '');
+  if (/rate.?limit|too many requests|quota|credits?|daily.?limit|insufficient|payment required|billing|concurrency|try again later/i.test(msg)) {
+    return true;
+  }
+  // SMTP soft deferrals / temp unavailability that often mean greylisting or daily caps.
+  if (/\b(421|450|451|452)\b/.test(msg)) return true;
+  return false;
+}
+
+async function finalizeCampaignSend(id, { results, audience, pauseReason }) {
+  const merged = await updateJson(files.log(id), {}, (current) => ({ ...(current || {}), ...results }));
+  const sentEmails = new Set(Object.entries(results).filter(([, r]) => r.s === 'sent').map(([e]) => e));
+  if (sentEmails.size) {
+    await updateJson(files.leads(), [], (list) => list.map((l) => (sentEmails.has(l.email) ? { ...l, lastEmailedAt: now() } : l)));
+  }
+  // Leftovers = still eligible and never successfully logged (failed rows stay out of remaining).
+  const remaining = audience.filter((l) => !merged[l.email]).length;
+  const all = Object.values(merged);
+  const openMap = await readJson(files.opens(id), {});
+  const openEntries = openMap && typeof openMap === 'object' ? Object.values(openMap) : [];
+  const stats = emptyStats({
+    sent: all.filter((r) => r.s === 'sent').length,
+    failed: all.filter((r) => r.s === 'failed').length,
+    opens: openEntries.length,
+    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
+  });
+  const failedNow = Object.values(results).filter((r) => r.s === 'failed').length;
+  let status;
+  if (pauseReason) status = 'paused';
+  else status = remaining <= 0 ? 'sent' : 'sending';
+  await updateJson(files.campaigns(), [], (list) =>
+    list.map((c) =>
+      c.id === id
+        ? {
+            ...c,
+            status,
+            stats,
+            remaining,
+            pauseReason: pauseReason || '',
+            ...(status === 'sent' ? { sentAt: now() } : {}),
+          }
+        : c,
+    ),
+  );
+  return {
+    status,
+    sentNow: sentEmails.size,
+    failedNow,
+    remaining,
+    stats,
+    pauseReason: pauseReason || '',
+  };
+}
+
 // Sends the next chunk of a campaign and returns progress; call again until remaining is 0. Each
-// address is tried once per send; failures are kept in the log and can be retried with retryFailed.
-// Each batch has an idempotency key from its recipients, so a doubled request can't send twice.
+// address is tried once per send; permanent failures are kept in the log and can be retried with
+// retryFailed. Provider credit/quota/rate limits leave leftovers unlogged so Resume can continue
+// later. Each batch has an idempotency key from its recipients, so a doubled request can't send twice.
 export async function sendCampaignChunk(id) {
   const campaign = await getCampaign(id);
   if (!campaign) throw fail('That campaign is gone.', 404);
@@ -964,8 +1059,18 @@ export async function sendCampaignChunk(id) {
   const perCall = emailProvider() === 'smtp' && onWorkers() ? SMTP_MAX_PER_CALL_WORKERS : MAX_PER_CALL;
   const chunk = pending.slice(0, perCall);
 
-  await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id && c.status !== 'sending' ? { ...c, status: 'sending', startedAt: c.startedAt || now() } : c)));
+  await updateJson(files.campaigns(), [], (list) =>
+    list.map((c) =>
+      c.id === id && c.status !== 'sending'
+        ? { ...c, status: 'sending', pauseReason: '', startedAt: c.startedAt || now() }
+        : c.id === id
+          ? { ...c, pauseReason: '' }
+          : c,
+    ),
+  );
   const results = {};
+  let stopReason = '';
+  let stopError = null;
   for (let i = 0; i < chunk.length; i += BATCH) {
     const batch = chunk.slice(i, i + BATCH);
     // Skip addresses whose merged subject is blank (e.g. {{subject}} with no CSV value) so SMTP
@@ -991,36 +1096,34 @@ export async function sendCampaignChunk(id) {
         results[lead.email] = r.error ? { s: 'failed', e: r.error, at: now() } : { s: 'sent', id: r.id || '', at: now() };
       });
     } catch (err) {
-      // A bad key or unverified domain fails every batch the same way: stop and say so.
-      if (err.status === 400 && /api key|domain|from|verify|smtp|password|cloudflare/i.test(err.message)) {
-        await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id ? { ...c, status: 'paused' } : c)));
-        throw err;
+      // Bad key / unverified domain: pause after saving any earlier successes; do not strand them.
+      if (isConfigSendError(err)) {
+        stopReason = 'config';
+        stopError = err;
+        break;
+      }
+      // Credits, daily quotas, rate limits: leave this batch (and the rest of the chunk) as leftovers.
+      if (isProviderLimitError(err)) {
+        stopReason = 'provider_limit';
+        stopError = err;
+        break;
       }
       deliverable.forEach(({ lead }) => (results[lead.email] = { s: 'failed', e: err.message, at: now() }));
     }
+    if (stopReason) break;
     if (i + BATCH < chunk.length) await new Promise((r) => setTimeout(r, 150));
   }
 
-  const merged = await updateJson(files.log(id), {}, (current) => ({ ...(current || {}), ...results }));
-  const sentEmails = new Set(Object.entries(results).filter(([, r]) => r.s === 'sent').map(([e]) => e));
-  if (sentEmails.size) {
-    await updateJson(files.leads(), [], (list) => list.map((l) => (sentEmails.has(l.email) ? { ...l, lastEmailedAt: now() } : l)));
+  const progress = await finalizeCampaignSend(id, { results, audience, pauseReason: stopReason });
+  if (stopReason === 'provider_limit') {
+    const n = progress.remaining;
+    throw fail(
+      `Sending paused because of provider credits, rate limits, or daily email quotas. ${n} recipient${n === 1 ? '' : 's'} still waiting — resume when your quota resets (for example, tomorrow).`,
+      stopError?.status || 503,
+    );
   }
-  const remaining = pending.length - chunk.length;
-  const all = Object.values(merged);
-  const openMap = await readJson(files.opens(id), {});
-  const openEntries = openMap && typeof openMap === 'object' ? Object.values(openMap) : [];
-  const stats = emptyStats({
-    sent: all.filter((r) => r.s === 'sent').length,
-    failed: all.filter((r) => r.s === 'failed').length,
-    opens: openEntries.length,
-    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
-  });
-  const status = remaining <= 0 ? 'sent' : 'sending';
-  await updateJson(files.campaigns(), [], (list) =>
-    list.map((c) => (c.id === id ? { ...c, status, stats, ...(status === 'sent' ? { sentAt: now() } : {}) } : c)),
-  );
-  return { status, sentNow: sentEmails.size, failedNow: chunk.length - sentEmails.size, remaining, stats };
+  if (stopReason === 'config') throw stopError;
+  return progress;
 }
 
 /** Clears failed addresses from the log so the next send tries them again. */
