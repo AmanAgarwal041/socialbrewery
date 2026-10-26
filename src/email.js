@@ -710,8 +710,31 @@ function replaceMarkdownImages(html) {
   return out;
 }
 
+const LINK_REL = 'noopener noreferrer';
+
+/** Peel trailing sentence punctuation off a bare URL so "https://x.com." keeps the period outside the href. */
+function splitBareUrl(raw) {
+  let url = raw;
+  let trail = '';
+  while (url.length > 8 && /[.,;:!?]$/.test(url)) {
+    trail = url.slice(-1) + trail;
+    url = url.slice(0, -1);
+  }
+  // Drop a closing paren that was only balancing an opener outside the URL (e.g. "(https://x.com)").
+  if (url.endsWith(')') && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
+    trail = ')' + trail;
+    url = url.slice(0, -1);
+  }
+  return { url, trail };
+}
+
+function anchorHtml(href, label) {
+  return `<a href="${href}" rel="${LINK_REL}">${label}</a>`;
+}
+
 // A small, safe Markdown subset: paragraphs, line breaks, images, **bold**, _italic_, [links](https://…) and bare links.
 // Images support merge-bound URLs/alts after merge() runs: ![{{product}}]({{hero_image|https://fallback}}).
+// Bare http(s) URLs become anchors after markdown links/images so we never double-link or link image srcs as text.
 export function bodyHtml(body) {
   return body
     .trim()
@@ -720,8 +743,13 @@ export function bodyHtml(body) {
       let html = escapeHtml(paragraph);
       // Images before links so ![alt](url) is not treated as a markdown link.
       html = replaceMarkdownImages(html);
-      html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => `<a href="${url}">${label}</a>`);
-      html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}">${url}</a>`);
+      html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => anchorHtml(url, label));
+      // Bare URLs: only after whitespace/`(`/start, so href="…" inside <a>/<img> is skipped.
+      html = html.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, (_, pre, raw) => {
+        const { url, trail } = splitBareUrl(raw);
+        if (!/^https?:\/\/[^\s<]+$/i.test(url)) return `${pre}${raw}`;
+        return `${pre}${anchorHtml(url, url)}${trail}`;
+      });
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|\W)_([^_]+)_(?=\W|$)/g, '$1<em>$2</em>');
       const trimmed = html.replace(/^(?:<br>\s*)+|(?:<br>\s*)+$/g, '').trim();
       if (!trimmed) return '';

@@ -77,7 +77,7 @@ test('emails merge fields, escape HTML, and always carry the address and unsubsc
     const rendered = email.renderEmail({ id: 'c'.repeat(16), subject: 'Hi {{first_name|there}}', body: 'Hello {{first_name|there}} at {{company}}.\n\n**Bold** <script>x</script> [docs](https://acme.com/docs)' }, lead);
     assert.equal(rendered.subject, 'Hi there');
     assert.match(rendered.html, /Hello there at &lt;Engines&gt;\./);
-    assert.match(rendered.html, /<strong>Bold<\/strong> &lt;script&gt;x&lt;\/script&gt; <a href="https:\/\/acme.com\/docs">docs<\/a>/);
+    assert.match(rendered.html, /<strong>Bold<\/strong> &lt;script&gt;x&lt;\/script&gt; <a href="https:\/\/acme.com\/docs" rel="noopener noreferrer">docs<\/a>/);
     assert.doesNotMatch(rendered.html, /<script>/);
     assert.match(rendered.html, /1 Main St, Springfield/);
     const unsubscribe = `https://brew.example.com/public/unsubscribe/${org.id}/${lead.id}?sig=`;
@@ -90,6 +90,44 @@ test('emails merge fields, escape HTML, and always carry the address and unsubsc
     const open = `https://brew.example.com/public/open/${org.id}/${'c'.repeat(16)}/${lead.id}?sig=`;
     assert.ok(rendered.html.includes(open));
     assert.match(rendered.html, /width="1" height="1"/);
+  });
+});
+
+test('bodyHtml turns bare http(s) URLs into anchors and keeps markdown links intact', () => {
+  const bare = email.bodyHtml('Visit https://example.com/path?x=1&y=2 for details.');
+  assert.match(bare, /Visit <a href="https:\/\/example\.com\/path\?x=1&amp;y=2" rel="noopener noreferrer">https:\/\/example\.com\/path\?x=1&amp;y=2<\/a> for details\./);
+
+  const md = email.bodyHtml('Read [the docs](https://acme.com/docs) please');
+  assert.match(md, /Read <a href="https:\/\/acme\.com\/docs" rel="noopener noreferrer">the docs<\/a> please/);
+  assert.doesNotMatch(md, /<a href="https:\/\/acme\.com\/docs"[^>]*>https:\/\/acme\.com\/docs<\/a>/);
+
+  const both = email.bodyHtml('Bare https://a.example and [label](https://b.example/x).');
+  assert.match(both, /Bare <a href="https:\/\/a\.example" rel="noopener noreferrer">https:\/\/a\.example<\/a> and <a href="https:\/\/b\.example\/x" rel="noopener noreferrer">label<\/a>\./);
+
+  const punct = email.bodyHtml('Go to https://example.com.');
+  assert.match(punct, /Go to <a href="https:\/\/example\.com" rel="noopener noreferrer">https:\/\/example\.com<\/a>\./);
+
+  const imageThenLink = email.bodyHtml('![logo](https://cdn.example.com/logo.png)\n\nMore at https://example.com/about');
+  assert.match(imageThenLink, /<img src="https:\/\/cdn\.example\.com\/logo\.png"/);
+  assert.doesNotMatch(imageThenLink, /<a href="https:\/\/cdn\.example\.com\/logo\.png"/);
+  assert.match(imageThenLink, /More at <a href="https:\/\/example\.com\/about" rel="noopener noreferrer">https:\/\/example\.com\/about<\/a>/);
+});
+
+test('renderEmail includes clickable bare URLs in sent campaign HTML', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    const lead = { id: 'a'.repeat(16), email: 'ada@x.com', firstName: 'Ada' };
+    const rendered = email.renderEmail(
+      {
+        id: 'c'.repeat(16),
+        subject: 'Links',
+        body: 'Hello Ada,\n\nCheck https://acme.com/launch and [docs](https://acme.com/docs).\n\n![hero](https://cdn.example.com/h.png)',
+      },
+      lead,
+    );
+    assert.match(rendered.html, /Check <a href="https:\/\/acme\.com\/launch" rel="noopener noreferrer">https:\/\/acme\.com\/launch<\/a>/);
+    assert.match(rendered.html, /<a href="https:\/\/acme\.com\/docs" rel="noopener noreferrer">docs<\/a>/);
+    assert.match(rendered.html, /<img src="https:\/\/cdn\.example\.com\/h\.png"/);
+    assert.doesNotMatch(rendered.html, /<a href="https:\/\/cdn\.example\.com\/h\.png"/);
   });
 });
 
