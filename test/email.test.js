@@ -90,6 +90,71 @@ test('emails merge fields, escape HTML, and always carry the address and unsubsc
   });
 });
 
+test('CSV extra columns become lead meta and work as merge fields; empty subjects are blocked', async () => {
+  assert.equal(email.metaKey('Company Size'), 'company_size');
+  assert.equal(email.metaKey('  SUBJECT '), 'subject');
+  assert.deepEqual(email.mapMetaColumns(['email', 'Subject', 'body', 'Custom Note', 'company']), {
+    subject: 1,
+    body: 2,
+    custom_note: 3,
+  });
+
+  await inNewOrg(SETTINGS, async () => {
+    const imported = await email.importLeads({
+      csv: 'email,subject,body,custom_note,company\nada@x.com,Hello Ada,Line one for Ada,note-a,Engines\nbob@x.com,Hello Bob,Line one for Bob,note-b,Analytical',
+      consent: true,
+    });
+    assert.equal(imported.added, 2);
+    const leads = await email.listLeads();
+    const ada = leads.find((l) => l.email === 'ada@x.com');
+    assert.deepEqual(ada.meta, { subject: 'Hello Ada', body: 'Line one for Ada', custom_note: 'note-a' });
+    assert.equal(ada.company, 'Engines');
+
+    const rendered = email.renderEmail(
+      { subject: '{{subject}}', body: '{{body}}\n{{custom_note}}\nHi {{first_name|there}}' },
+      ada,
+    );
+    assert.equal(rendered.subject, 'Hello Ada');
+    assert.match(rendered.text, /^Line one for Ada\nnote-a\nHi there/);
+
+    // Core fields win over a colliding meta key; unknown tags stay as written.
+    assert.equal(email.merge('{{company}}|{{typo_field}}', { company: 'Core', meta: { company: 'Meta' } }), 'Core|{{typo_field}}');
+    assert.equal(email.merge('{{missing}}', {}), '{{missing}}');
+    assert.equal(email.merge('{{first_name|pal}}', { firstName: '' }), 'pal');
+
+    // Re-import refreshes meta for columns in this CSV (blank overwrites that key).
+    await email.importLeads({
+      csv: 'email,subject,body\nada@x.com,Updated subject,\n',
+      consent: true,
+    });
+    const [again] = (await email.listLeads()).filter((l) => l.email === 'ada@x.com');
+    assert.equal(again.meta.subject, 'Updated subject');
+    assert.equal(again.meta.body, '', 'blank cell refreshes the key to empty');
+    assert.equal(again.meta.custom_note, 'note-a', 'columns absent from this CSV are left alone');
+
+    const manual = await email.addLead({ email: 'manual@x.com', firstName: 'Mo', meta: { subject: 'From API', offer: '20%' } });
+    assert.deepEqual(manual.meta, { subject: 'From API', offer: '20%' });
+    assert.equal(email.merge('{{subject}} {{offer}}', manual), 'From API 20%');
+
+    // Subject that resolves to empty with a blank lead is refused before send (and would hang some SMTP servers).
+    const emptySubject = await email.saveCampaign('', { subject: '{{first_name}}', body: 'Hi' });
+    await assert.rejects(email.sendCampaignChunk(emptySubject.id), /Subject is empty after merge|CSV column/);
+    await assert.rejects(email.sendTest(emptySubject.id, 'me@acme.com'), /Subject is empty after merge|CSV column/);
+
+    // {{subject}} stays as written on a blank sample, so assertReady allows it; a lead with an empty
+    // subject meta key fails that address only (known empty field → "").
+    const perLead = await email.saveCampaign('', { subject: '{{subject}}', body: '{{body|Hi}}' });
+    await email.addLead({ email: 'nosub@x.com', meta: { subject: '', body: 'No subject lead' } });
+    const calls = mockResend();
+    const result = await email.sendCampaignChunk(perLead.id);
+    assert.ok(result.sentNow >= 2, 'leads with subject meta still send');
+    assert.ok(calls.length >= 1);
+    assert.ok(calls.some((c) => (Array.isArray(c.body) ? c.body : [c.body]).some((m) => m.subject === 'Hello Bob' || m.subject === 'Updated subject')));
+    const details = await email.campaignDetails(perLead.id);
+    assert.ok(details.failures.some((f) => f.email === 'nosub@x.com' && /empty after merge/i.test(f.error)));
+  });
+});
+
 test('campaigns send in batches of 100 to subscribed leads in the audience, once each', async () => {
   await inNewOrg(SETTINGS, async () => {
     const rows = Array.from({ length: 250 }, (_, i) => `lead${i}@x.com,${i % 2 ? 'vip' : 'other'}`).join('\n');

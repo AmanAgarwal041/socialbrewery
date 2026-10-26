@@ -56,7 +56,15 @@ function merge(template: string, lead: Partial<Lead>) {
     company: lead.company || '',
     email: lead.email || '',
   }
-  return template.replace(/\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}/gi, (_, key: string, fallback?: string) => values[key.toLowerCase()] || (fallback ?? '').trim())
+  for (const [key, value] of Object.entries(lead.meta || {})) {
+    const k = key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    if (k && values[k] === undefined) values[k] = value
+  }
+  return template.replace(/\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}/gi, (match, key: string, fallback?: string) => {
+    const k = key.toLowerCase()
+    if (!Object.prototype.hasOwnProperty.call(values, k)) return match
+    return values[k] || (fallback ?? '').trim()
+  })
 }
 
 // The preview shows the same light formatting the email gets: **bold**, [label](url), and bare links.
@@ -266,7 +274,7 @@ function ImportDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCha
         <DialogHeader>
           <DialogTitle>Import leads from CSV</DialogTitle>
           <DialogDescription>
-            Needs an email column. Name, first name, last name, company, and tags columns are picked up too. People who unsubscribed or bounced stay that way.
+            Needs an email column. Name, first name, last name, company, and tags are picked up as lead fields; any other column (subject, body, custom_note, …) is kept as a merge field. People who unsubscribed or bounced stay that way.
           </DialogDescription>
         </DialogHeader>
         {result ? (
@@ -762,9 +770,10 @@ export function EmailCampaignPage() {
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Merge fields: <code>{'{{first_name}}'}</code>, <code>{'{{last_name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{email}}'}</code>; add a fallback like{' '}
-                  <code>{'{{first_name|there}}'}</code>. **bold**, [link](https://…) and blank lines between paragraphs work. Your postal address and an unsubscribe link are
-                  added at the bottom.
+                  Merge fields: <code>{'{{first_name}}'}</code>, <code>{'{{last_name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{email}}'}</code>, plus any CSV
+                  column as <code>{'{{column_name}}'}</code> (e.g. <code>{'{{subject}}'}</code>); add a fallback like <code>{'{{first_name|there}}'}</code>. Unknown tags
+                  stay as written. **bold**, [link](https://…) and blank lines between paragraphs work. Your postal address and an unsubscribe link are added at the
+                  bottom.
                 </p>
               </div>
               <div className="space-y-1.5">
