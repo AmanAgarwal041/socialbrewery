@@ -55,6 +55,36 @@ function cleanTags(value) {
 
 const text = (value, max) => String(value ?? '').trim().slice(0, max);
 
+// Built-in merge fields. CSV columns outside the mapped core headers land in lead.meta under the
+// same snake_case keys ({{subject}}, {{body}}, {{company_size}}, …). Core always wins over meta.
+const CORE_MERGE = ['first_name', 'last_name', 'name', 'company', 'email'];
+const MAX_META_KEYS = 40;
+const MAX_META_VALUE = 5000;
+
+/** Turn a CSV header into a merge-field key: "Company Size" / "company-size" → company_size. */
+export function metaKey(header) {
+  return String(header || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
+function cleanMeta(value, base = {}) {
+  const src = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const out = { ...base };
+  for (const [raw, v] of Object.entries(src)) {
+    const key = metaKey(raw);
+    if (!key || CORE_MERGE.includes(key)) continue;
+    // Keep blank values: the key is still a known merge field (resolves to "" / |fallback).
+    out[key] = text(v, MAX_META_VALUE);
+  }
+  const keys = Object.keys(out);
+  if (keys.length <= MAX_META_KEYS) return out;
+  return Object.fromEntries(keys.slice(0, MAX_META_KEYS).map((k) => [k, out[k]]));
+}
+
 // ---------- settings ----------
 
 export function emailProvider() {
@@ -124,12 +154,15 @@ export async function listLeads() {
 function leadFrom(fields, base = {}) {
   const first = text(fields.firstName ?? base.firstName, 80);
   const last = text(fields.lastName ?? base.lastName, 80);
+  const meta =
+    fields.meta !== undefined ? cleanMeta(fields.meta, base.meta || {}) : base.meta && typeof base.meta === 'object' ? base.meta : {};
   return {
     ...base,
     firstName: first,
     lastName: last,
     company: text(fields.company ?? base.company, 120),
     tags: fields.tags !== undefined ? cleanTags(fields.tags) : base.tags || [],
+    meta,
   };
 }
 
@@ -233,12 +266,34 @@ export function mapColumns(header) {
   return map;
 }
 
+/** Extra CSV headers → merge keys. Skips columns already mapped as core lead fields. */
+export function mapMetaColumns(header, columns = mapColumns(header)) {
+  const used = new Set(Object.values(columns));
+  const meta = {};
+  header.forEach((raw, index) => {
+    if (used.has(index)) return;
+    const key = metaKey(raw);
+    if (!key || CORE_MERGE.includes(key) || meta[key] !== undefined) return;
+    meta[key] = index;
+  });
+  return meta;
+}
+
+function rowMeta(row, metaColumns) {
+  const meta = {};
+  for (const [key, index] of Object.entries(metaColumns)) {
+    meta[key] = text(row[index], MAX_META_VALUE);
+  }
+  return meta;
+}
+
 export async function importLeads({ csv, consent, tags }) {
   if (consent !== true) throw fail('Confirm that everyone on this list agreed to receive email from you.');
   const rows = parseCsv(csv);
   if (rows.length < 2) throw fail('The CSV needs a header row and at least one contact.');
   const columns = mapColumns(rows[0]);
   if (columns.email === undefined) throw fail('Couldn’t find an email column. Name one of the columns "email".');
+  const metaColumns = mapMetaColumns(rows[0], columns);
   const extraTags = cleanTags(tags);
   const blocked = await suppressed();
   const result = { added: 0, updated: 0, skipped: [], total: rows.length - 1 };
@@ -258,15 +313,18 @@ export async function importLeads({ csv, consent, tags }) {
         firstName = parts[0] || '';
         lastName = parts.slice(1).join(' ');
       }
-      const fields = { firstName, lastName, company: cell('company'), tags: [...cleanTags(cell('tags')), ...extraTags] };
+      const rowExtra = rowMeta(row, metaColumns);
+      const fields = { firstName, lastName, company: cell('company'), tags: [...cleanTags(cell('tags')), ...extraTags], meta: rowExtra };
       const existing = byEmail.get(email);
       if (existing) {
         // Fill in what was missing; never change someone's subscription status from a CSV.
+        // Meta keys present in this CSV replace prior values (including blank).
         Object.assign(existing, {
           firstName: existing.firstName || text(fields.firstName, 80),
           lastName: existing.lastName || text(fields.lastName, 80),
           company: existing.company || text(fields.company, 120),
           tags: cleanTags([...(existing.tags || []), ...fields.tags]),
+          meta: { ...(existing.meta && typeof existing.meta === 'object' ? existing.meta : {}), ...rowExtra },
           updatedAt: now(),
         });
         result.updated++;
@@ -359,21 +417,35 @@ export async function campaignDetails(id) {
 
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function mergeValues(lead) {
-  const first = lead.firstName || '';
-  return {
+export function mergeValues(lead) {
+  const first = lead?.firstName || '';
+  const values = {
     first_name: first,
-    last_name: lead.lastName || '',
-    name: [lead.firstName, lead.lastName].filter(Boolean).join(' '),
-    company: lead.company || '',
-    email: lead.email || '',
+    last_name: lead?.lastName || '',
+    name: [lead?.firstName, lead?.lastName].filter(Boolean).join(' '),
+    company: lead?.company || '',
+    email: lead?.email || '',
   };
+  // CSV / manual metadata: core fields win if a meta key collides.
+  const meta = lead?.meta && typeof lead.meta === 'object' ? lead.meta : {};
+  for (const [key, value] of Object.entries(meta)) {
+    const k = metaKey(key);
+    if (!k || CORE_MERGE.includes(k) || values[k] !== undefined) continue;
+    values[k] = String(value ?? '');
+  }
+  return values;
 }
 
-// {{first_name}} or {{first_name|there}} (the fallback is used when the field is empty).
+// {{first_name}} or {{first_name|there}} (fallback when the known field is empty).
+// Unknown tags (no core field and no lead.meta key) stay as written so typos and unused
+// {{subject}} placeholders are visible in previews instead of silently blanking the subject.
 export function merge(template, lead) {
   const values = mergeValues(lead);
-  return String(template || '').replace(/\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}/gi, (_, key, fallback) => values[key.toLowerCase()] || (fallback ?? '').trim());
+  return String(template || '').replace(/\{\{\s*([a-z_]+)\s*(?:\|([^}]*))?\}\}/gi, (match, key, fallback) => {
+    const k = key.toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(values, k)) return match;
+    return values[k] || (fallback ?? '').trim();
+  });
 }
 
 // A small, safe Markdown subset: paragraphs, line breaks, **bold**, _italic_, [links](https://…) and bare links.
@@ -563,11 +635,17 @@ function message(campaign, lead) {
   };
 }
 
+const EMPTY_SUBJECT_HINT =
+  'Subject is empty after merge fields. Use plain text, a fallback like {{first_name|Hi}}, or a CSV column such as {{subject}}. Built-in fields: first_name, last_name, name, company, email; any other CSV column works as {{column_name}}.';
+
 function assertReady(campaign) {
   const status = emailStatus();
   if (!status.ready) throw fail(`Add your ${status.missing.join(', ')} in Settings → Email before sending.`);
   if (!campaign.subject.trim()) throw fail('Give the campaign a subject.');
   if (!campaign.body.trim()) throw fail('Write the email first.');
+  // Blank sample: known empty fields become "" (or their fallback). Unknown tags stay as written.
+  // A subject that is only {{first_name}} with no fallback would hang some SMTP servers on DATA.
+  if (!merge(campaign.subject, {}).trim()) throw fail(EMPTY_SUBJECT_HINT);
 }
 
 export async function sendTest(id, to) {
@@ -603,10 +681,25 @@ export async function sendCampaignChunk(id) {
   const results = {};
   for (let i = 0; i < chunk.length; i += BATCH) {
     const batch = chunk.slice(i, i + BATCH);
-    const key = `sb-${id}-${sha256(batch.map((l) => l.email).join(',')).slice(0, 32)}`;
+    // Skip addresses whose merged subject is blank (e.g. {{subject}} with no CSV value) so SMTP
+    // never sees an empty Subject header.
+    const deliverable = [];
+    for (const lead of batch) {
+      const msg = message(campaign, lead);
+      if (!String(msg.subject || '').trim()) {
+        results[lead.email] = { s: 'failed', e: 'Subject is empty after merge fields for this lead.', at: now() };
+      } else {
+        deliverable.push({ lead, msg });
+      }
+    }
+    if (!deliverable.length) continue;
+    const key = `sb-${id}-${sha256(deliverable.map(({ lead }) => lead.email).join(',')).slice(0, 32)}`;
     try {
-      const sent = await deliverBatch(batch.map((lead) => message(campaign, lead)), key);
-      batch.forEach((lead, j) => {
+      const sent = await deliverBatch(
+        deliverable.map(({ msg }) => msg),
+        key,
+      );
+      deliverable.forEach(({ lead }, j) => {
         const r = sent[j] || { error: 'Not sent.' };
         results[lead.email] = r.error ? { s: 'failed', e: r.error, at: now() } : { s: 'sent', id: r.id || '', at: now() };
       });
@@ -616,7 +709,7 @@ export async function sendCampaignChunk(id) {
         await updateJson(files.campaigns(), [], (list) => list.map((c) => (c.id === id ? { ...c, status: 'paused' } : c)));
         throw err;
       }
-      batch.forEach((lead) => (results[lead.email] = { s: 'failed', e: err.message, at: now() }));
+      deliverable.forEach(({ lead }) => (results[lead.email] = { s: 'failed', e: err.message, at: now() }));
     }
     if (i + BATCH < chunk.length) await new Promise((r) => setTimeout(r, 150));
   }

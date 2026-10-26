@@ -129,6 +129,8 @@ export type Lead = {
   lastName: string
   company: string
   tags: string[]
+  /** Extra CSV columns, keyed for merge fields ({{subject}}, {{custom_note}}, …). */
+  meta?: Record<string, string>
   status: LeadStatus
   source: 'csv' | 'manual'
   createdAt: string
