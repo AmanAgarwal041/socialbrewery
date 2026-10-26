@@ -68,8 +68,24 @@ function merge(template: string, lead: Partial<Lead>) {
 }
 
 // The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
+/** Peel trailing sentence punctuation so bare URLs match outbound `bodyHtml` linking. */
+function splitBareUrl(raw: string) {
+  let url = raw
+  let trail = ''
+  while (url.length > 8 && /[.,;:!?]$/.test(url)) {
+    trail = url.slice(-1) + trail
+    url = url.slice(0, -1)
+  }
+  if (url.endsWith(')') && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
+    trail = ')' + trail
+    url = url.slice(0, -1)
+  }
+  return { url, trail }
+}
+
 function Formatted({ text }: { text: string }) {
-  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<)]+)/g)
+  // Keep in sync with src/email.js bodyHtml: images, bold, markdown links, then bare http(s) URLs.
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<]+)/g)
   return (
     <>
       {parts.map((part, i) => {
@@ -82,13 +98,24 @@ function Formatted({ text }: { text: string }) {
         const bold = /^\*\*([^*]+)\*\*$/.exec(part)
         if (bold) return <strong key={i}>{bold[1]}</strong>
         const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part)
-        const href = link ? link[2] : /^https?:\/\//.test(part) ? part : ''
-        if (href)
+        if (link)
           return (
-            <a key={i} href={href} target="_blank" rel="noreferrer" className="text-p1-ink underline">
-              {link ? link[1] : part}
+            <a key={i} href={link[2]} target="_blank" rel="noopener noreferrer" className="text-p1-ink underline">
+              {link[1]}
             </a>
           )
+        if (/^https?:\/\//.test(part)) {
+          const { url, trail } = splitBareUrl(part)
+          if (!/^https?:\/\/[^\s<]+$/i.test(url)) return part
+          return (
+            <span key={i}>
+              <a href={url} target="_blank" rel="noopener noreferrer" className="text-p1-ink underline">
+                {url}
+              </a>
+              {trail}
+            </span>
+          )
+        }
         return part
       })}
     </>
