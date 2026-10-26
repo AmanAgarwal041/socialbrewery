@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { CircleAlert, FileUp, Loader2, Mail, MailCheck, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
+import { CircleAlert, FileUp, ImagePlus, Loader2, Mail, MailCheck, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { AssistantTabs } from '@/components/assistant-tabs'
 import { CopyField, EmptyState, PageHeader, Stat } from '@/components/common'
@@ -26,7 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { api, postJson, sendJson, timeAgo, type Campaign, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
+import { api, postJson, sendJson, timeAgo, uploadCampaignBanner, type Campaign, type EmailStatus, type ImportResult, type Lead, type SendResult } from '@/lib/api'
 import { useAppState } from '@/lib/app-state'
 import { useAssistant } from '@/lib/assistant'
 import { cn } from '@/lib/utils'
@@ -67,12 +67,18 @@ function merge(template: string, lead: Partial<Lead>) {
   })
 }
 
-// The preview shows the same light formatting the email gets: **bold**, [label](url), and bare links.
+// The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
 function Formatted({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<)]+)/g)
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<)]+)/g)
   return (
     <>
       {parts.map((part, i) => {
+        const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(part)
+        if (image) {
+          const src = /^https?:\/\//i.test(image[2].trim()) ? image[2].trim() : ''
+          if (!src) return null
+          return <img key={i} src={src} alt={image[1]} className="my-2 max-w-full rounded-md" />
+        }
         const bold = /^\*\*([^*]+)\*\*$/.exec(part)
         if (bold) return <strong key={i}>{bold[1]}</strong>
         const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part)
@@ -147,8 +153,8 @@ function SetupNotice({ status }: { status: EmailStatus }) {
       {!status.publicLinks && (
         <Alert>
           <CircleAlert />
-          <AlertTitle>Unsubscribe links need a public address</AlertTitle>
-          <AlertDescription>APP_URL points at this computer, so the unsubscribe links in your emails won’t open for recipients. Deploy, or set APP_URL to a public https URL.</AlertDescription>
+          <AlertTitle>Public links need a public address</AlertTitle>
+          <AlertDescription>APP_URL points at this computer, so unsubscribe links, open tracking, and banner images in your emails won’t work for recipients. Deploy, or set APP_URL to a public https URL.</AlertDescription>
         </Alert>
       )}
       {status.ready && !status.webhookSet && canManage && status.webhookUrl && (
@@ -545,6 +551,7 @@ export function EmailCampaignsPage() {
               {c.status !== 'draft' && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {c.stats.sent} sent{c.stats.failed ? ` · ${c.stats.failed} failed` : ''}
+                  {c.stats.opens ? ` · ${c.stats.opens} opened` : ''}
                   {c.audienceTags.length ? ` · tags: ${c.audienceTags.join(', ')}` : ''}
                 </p>
               )}
@@ -565,7 +572,15 @@ export function EmailCampaignPage() {
   const assistant = useAssistant(health)
   const { status, leads } = useEmail()
   const [details, setDetails] = useState<Details | null>(null)
-  const [form, setForm] = useState({ name: '', subject: '', body: '', tags: '' })
+  const [form, setForm] = useState({
+    name: '',
+    subject: '',
+    body: '',
+    tags: '',
+    bannerEnabled: false,
+    bannerImageUrl: '',
+    bannerLinkUrl: '',
+  })
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [brief, setBrief] = useState('')
@@ -575,11 +590,24 @@ export function EmailCampaignPage() {
   const [confirmSend, setConfirmSend] = useState(false)
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [bannerUploading, setBannerUploading] = useState(false)
+  const [bannerPreviewKey, setBannerPreviewKey] = useState(0)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const bannerFileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     const data = await api<Details>(`/api/email/campaigns/${id}`)
     setDetails(data)
-    setForm({ name: data.campaign.name, subject: data.campaign.subject, body: data.campaign.body, tags: data.campaign.audienceTags.join(', ') })
+    setForm({
+      name: data.campaign.name,
+      subject: data.campaign.subject,
+      body: data.campaign.body,
+      tags: data.campaign.audienceTags.join(', '),
+      bannerEnabled: Boolean(data.campaign.bannerEnabled),
+      bannerImageUrl: data.campaign.bannerImageUrl || '',
+      bannerLinkUrl: data.campaign.bannerLinkUrl || '',
+    })
+    setBannerPreviewKey((k) => k + 1)
     setDirty(false)
   }, [id])
 
@@ -590,16 +618,70 @@ export function EmailCampaignPage() {
   const editable = details?.campaign.status === 'draft'
   const audienceTags = splitTags(form.tags)
   const audience = (leads || []).filter((l) => l.status === 'subscribed' && (!audienceTags.length || l.tags.some((t) => audienceTags.includes(t))))
-  const sample = audience[0] || { firstName: 'Alex', lastName: 'Sample', company: 'Example Co', email: 'alex@example.com' }
-  const set = (key: keyof typeof form, value: string) => {
+  const sample = audience[0] || { firstName: 'Alex', lastName: 'Sample', company: 'Example Co', email: 'alex@example.com', meta: {} }
+  const set = (key: keyof typeof form, value: string | boolean) => {
     setForm((f) => ({ ...f, [key]: value }))
     setDirty(true)
+  }
+
+  async function onBannerFile(file?: File | null) {
+    if (!file || !editable) return
+    setBannerUploading(true)
+    try {
+      const campaign = await uploadCampaignBanner(id, file)
+      setDetails((d) => (d ? { ...d, campaign } : d))
+      setForm((f) => ({ ...f, bannerEnabled: true }))
+      setBannerPreviewKey((k) => k + 1)
+      toast.success('Banner uploaded.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setBannerUploading(false)
+      if (bannerFileRef.current) bannerFileRef.current.value = ''
+    }
+  }
+
+  async function removeBannerUpload() {
+    try {
+      const { campaign } = await sendJson<{ campaign: Campaign }>(`/api/email/campaigns/${id}/banner`, 'DELETE')
+      setDetails((d) => (d ? { ...d, campaign } : d))
+      setBannerPreviewKey((k) => k + 1)
+      toast.success('Uploaded banner removed.')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  function insertImageSnippet() {
+    const snippet = '![{{product_name|Product}}]({{hero_image|https://example.com/image.png}})\n\n'
+    const el = bodyRef.current
+    if (!el || !editable) {
+      set('body', `${form.body}${form.body && !form.body.endsWith('\n') ? '\n' : ''}${snippet}`)
+      return
+    }
+    const start = el.selectionStart ?? form.body.length
+    const end = el.selectionEnd ?? start
+    const next = `${form.body.slice(0, start)}${snippet}${form.body.slice(end)}`
+    set('body', next)
+    requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + snippet.length
+      el.setSelectionRange(pos, pos)
+    })
   }
 
   async function save() {
     setSaving(true)
     try {
-      await sendJson(`/api/email/campaigns/${id}`, 'PATCH', { name: form.name, subject: form.subject, body: form.body, audienceTags })
+      await sendJson(`/api/email/campaigns/${id}`, 'PATCH', {
+        name: form.name,
+        subject: form.subject,
+        body: form.body,
+        audienceTags,
+        bannerEnabled: form.bannerEnabled,
+        bannerImageUrl: form.bannerImageUrl,
+        bannerLinkUrl: form.bannerLinkUrl,
+      })
       await load()
       return true
     } catch (err) {
@@ -692,7 +774,7 @@ export function EmailCampaignPage() {
         description={
           editable
             ? `${audience.length} subscribed ${audience.length === 1 ? 'person' : 'people'} will get this${audienceTags.length ? ` (tags: ${audienceTags.join(', ')})` : ''}.`
-            : `${c.stats.sent} sent${c.stats.failed ? `, ${c.stats.failed} failed` : ''}${c.sentAt ? ` · finished ${timeAgo(c.sentAt)}` : ''}.`
+            : `${c.stats.sent} sent${c.stats.failed ? `, ${c.stats.failed} failed` : ''}${c.stats.opens ? `, ${c.stats.opens} opened` : ''}${c.sentAt ? ` · finished ${timeAgo(c.sentAt)}` : ''}.`
         }
         actions={
           <>
@@ -759,9 +841,17 @@ export function EmailCampaignPage() {
                 <Input id="c-subject" value={form.subject} disabled={!editable} onChange={(e) => set('subject', e.target.value)} placeholder="A quick update for {{first_name|you}}" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="c-body">Email</Label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="c-body">Email</Label>
+                  {editable && (
+                    <Button type="button" size="sm" variant="outline" onClick={insertImageSnippet}>
+                      <ImagePlus /> Insert image
+                    </Button>
+                  )}
+                </div>
                 <Textarea
                   id="c-body"
+                  ref={bodyRef}
                   rows={12}
                   value={form.body}
                   disabled={!editable}
@@ -772,9 +862,91 @@ export function EmailCampaignPage() {
                 <p className="text-xs text-muted-foreground">
                   Merge fields: <code>{'{{first_name}}'}</code>, <code>{'{{last_name}}'}</code>, <code>{'{{company}}'}</code>, <code>{'{{email}}'}</code>, plus any CSV
                   column as <code>{'{{column_name}}'}</code> (e.g. <code>{'{{subject}}'}</code>); add a fallback like <code>{'{{first_name|there}}'}</code>. Unknown tags
-                  stay as written. **bold**, [link](https://…) and blank lines between paragraphs work. Your postal address and an unsubscribe link are added at the
-                  bottom.
+                  stay as written. Images: <code>![alt](https://…)</code> or merge-bound{' '}
+                  <code>{'![{{product_name}}]({{hero_image|https://fallback}})'}</code> (http/https only; empty URLs are skipped). **bold**, [link](https://…) and blank
+                  lines between paragraphs work. Your postal address and an unsubscribe link are added at the bottom.
                 </p>
+              </div>
+              <div className="space-y-3 rounded-xl border p-3">
+                <label className="flex items-start gap-3 text-sm">
+                  <Switch
+                    checked={form.bannerEnabled}
+                    disabled={!editable}
+                    onCheckedChange={(v) => {
+                      set('bannerEnabled', v)
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium">Header banner</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Places an image above the body. Upload a file (~1200×176 works well) or paste an https image URL. A URL overrides the upload when both are set.
+                    </span>
+                  </span>
+                </label>
+                {form.bannerEnabled && (
+                  <div className="space-y-3">
+                    <input
+                      ref={bannerFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                      hidden
+                      onChange={(e) => void onBannerFile(e.target.files?.[0])}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={!editable || bannerUploading}
+                        onClick={() => bannerFileRef.current?.click()}
+                      >
+                        {bannerUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />} Upload image
+                      </Button>
+                      {details?.campaign.bannerAssetId && editable && (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => void removeBannerUpload()}>
+                          <Trash2 /> Remove upload
+                        </Button>
+                      )}
+                      {details?.campaign.bannerAssetId && (
+                        <span className="text-xs text-muted-foreground">Uploaded banner ready</span>
+                      )}
+                    </div>
+                    {(form.bannerImageUrl.trim() || details?.campaign.bannerAssetId) && (
+                      <div className="overflow-hidden rounded-lg border bg-muted/40">
+                        <img
+                          src={
+                            /^https?:\/\//i.test(merge(form.bannerImageUrl, sample).trim())
+                              ? merge(form.bannerImageUrl, sample).trim()
+                              : `/api/email/campaigns/${id}/banner?v=${details?.campaign.bannerAssetId || ''}-${bannerPreviewKey}`
+                          }
+                          alt="Banner preview"
+                          className="max-h-40 w-full object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="c-banner-image">Or image URL (optional override)</Label>
+                      <Input
+                        id="c-banner-image"
+                        value={form.bannerImageUrl}
+                        disabled={!editable}
+                        onChange={(e) => set('bannerImageUrl', e.target.value)}
+                        placeholder="https://… or {{hero_image|https://…}}"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="c-banner-link">Banner link URL (optional)</Label>
+                      <Input
+                        id="c-banner-link"
+                        value={form.bannerLinkUrl}
+                        disabled={!editable}
+                        onChange={(e) => set('bannerLinkUrl', e.target.value)}
+                        placeholder="https://example.com"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="c-tags">Send to tags</Label>
@@ -811,8 +983,29 @@ export function EmailCampaignPage() {
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <p className="font-medium">{merge(form.subject, sample) || <span className="text-muted-foreground">No subject</span>}</p>
-              <div className="rounded-xl border bg-background p-3 whitespace-pre-wrap">{form.body ? <Formatted text={merge(form.body, sample)} /> : <span className="text-muted-foreground">Nothing written yet.</span>}</div>
-              <p className="text-xs text-muted-foreground">+ your postal address and an unsubscribe link</p>
+              <div className="rounded-xl border bg-background p-3 whitespace-pre-wrap">
+                {form.bannerEnabled &&
+                  (() => {
+                    const url = merge(form.bannerImageUrl, sample).trim()
+                    const src = /^https?:\/\//i.test(url)
+                      ? url
+                      : details?.campaign.bannerAssetId
+                        ? `/api/email/campaigns/${id}/banner?v=${details.campaign.bannerAssetId}-${bannerPreviewKey}`
+                        : ''
+                    if (!src) return null
+                    const href = merge(form.bannerLinkUrl, sample).trim()
+                    const img = <img src={src} alt="Banner preview" className="mb-3 w-full rounded-md" />
+                    return href && /^https?:\/\//i.test(href) ? (
+                      <a href={href} target="_blank" rel="noreferrer" className="mb-3 block">
+                        {img}
+                      </a>
+                    ) : (
+                      img
+                    )
+                  })()}
+                {form.body ? <Formatted text={merge(form.body, sample)} /> : <span className="text-muted-foreground">Nothing written yet.</span>}
+              </div>
+              <p className="text-xs text-muted-foreground">+ your postal address, unsubscribe link, and open-tracking pixel</p>
             </CardContent>
           </Card>
           {canManage && (

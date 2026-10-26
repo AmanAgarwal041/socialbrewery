@@ -143,11 +143,17 @@ export type Campaign = {
   subject: string
   body: string
   audienceTags: string[]
+  /** Optional header banner above the body (upload and/or image URL). */
+  bannerEnabled?: boolean
+  bannerImageUrl?: string
+  bannerLinkUrl?: string
+  bannerAssetId?: string
+  bannerMime?: string
   status: 'draft' | 'sending' | 'paused' | 'sent'
   createdAt: string
   updatedAt: string
   sentAt: string
-  stats: { sent: number; failed: number }
+  stats: { sent: number; failed: number; opens?: number; openCount?: number }
 }
 export type EmailStatus = {
   ready: boolean
@@ -402,6 +408,18 @@ export async function uploadMedia(file: File): Promise<{ id: string; name: strin
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || 'Upload failed.')
   return data.media
+}
+
+/** Upload a campaign header banner (PNG/JPEG/WebP/GIF, max ~750 KB). */
+export async function uploadCampaignBanner(campaignId: string, file: File): Promise<Campaign> {
+  const res = await authedFetch(`/api/email/campaigns/${campaignId}/banner`, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || 'Banner upload failed.')
+  return data.campaign
 }
 
 export async function readSse(response: Response, onEvent: (event: string, data: any) => void) {
