@@ -155,6 +155,20 @@ export type Campaign = {
   sentAt: string
   stats: { sent: number; failed: number; opens?: number; openCount?: number }
 }
+/** Per-campaign delivery and open-tracking summary (also nested under campaign details). */
+export type CampaignAnalytics = {
+  campaignId: string
+  status: Campaign['status']
+  audience: number
+  sent: number
+  failed: number
+  remaining: number
+  uniqueOpens: number
+  openEvents: number
+  /** Unique opens / sent as a percent (one decimal), or null when nothing has been sent. */
+  openRate: number | null
+  opens: { email: string; firstOpenedAt: string; lastOpenedAt: string; openCount: number }[]
+}
 export type EmailStatus = {
   ready: boolean
   missing: string[]

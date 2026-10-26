@@ -520,6 +520,61 @@ function audienceOf(campaign, leads) {
   return leads.filter((l) => l.status === 'subscribed' && (!tags.length || (l.tags || []).some((t) => tags.includes(t))));
 }
 
+function openStatsFromMap(opens) {
+  const openEntries = opens && typeof opens === 'object' ? Object.values(opens) : [];
+  return {
+    opens: openEntries.length,
+    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
+  };
+}
+
+/** Build delivery + engagement numbers from already-loaded campaign, log, and open maps. */
+function buildCampaignAnalytics(campaign, leads, log, opens) {
+  const audience = audienceOf(campaign, leads);
+  const logMap = log && typeof log === 'object' ? log : {};
+  const logEntries = Object.values(logMap);
+  // Prefer the send log when it has rows; otherwise use stored campaign.stats (drafts / legacy).
+  const sentCount = logEntries.length
+    ? logEntries.filter((r) => r?.s === 'sent').length
+    : Number(campaign.stats?.sent) || 0;
+  const failedCount = logEntries.length
+    ? logEntries.filter((r) => r?.s === 'failed').length
+    : Number(campaign.stats?.failed) || 0;
+  const remaining = audience.filter((l) => !logMap[l.email]).length;
+  const openStats = openStatsFromMap(opens);
+  const openRate = sentCount > 0 ? Math.round((openStats.opens / sentCount) * 1000) / 10 : null;
+  const openRows = Object.values(opens && typeof opens === 'object' ? opens : {})
+    .map((entry) => ({
+      email: String(entry?.email || ''),
+      firstOpenedAt: String(entry?.first || ''),
+      lastOpenedAt: String(entry?.last || ''),
+      openCount: Number(entry?.n) || 0,
+    }))
+    .filter((row) => row.email)
+    .sort((a, b) => String(b.firstOpenedAt).localeCompare(String(a.firstOpenedAt)))
+    .slice(0, 500);
+  return {
+    campaignId: campaign.id,
+    status: campaign.status,
+    audience: audience.length,
+    sent: sentCount,
+    failed: failedCount,
+    remaining,
+    uniqueOpens: openStats.opens,
+    openEvents: openStats.openCount,
+    openRate,
+    opens: openRows,
+  };
+}
+
+/** Per-campaign delivery + engagement summary from the send log and open pixel store. */
+export async function campaignAnalytics(id) {
+  const campaign = await getCampaign(id);
+  if (!campaign) throw fail('That campaign is gone.', 404);
+  const [leads, log, opens] = await Promise.all([listLeads(), readJson(files.log(id), {}), readJson(files.opens(id), {})]);
+  return buildCampaignAnalytics(campaign, leads, log, opens);
+}
+
 export async function campaignDetails(id) {
   const campaign = await getCampaign(id);
   if (!campaign) throw fail('That campaign is gone.', 404);
@@ -530,14 +585,16 @@ export async function campaignDetails(id) {
     .filter(([, v]) => v.s === 'failed')
     .slice(0, 50)
     .map(([email, v]) => ({ email, error: v.e || '' }));
-  const openEntries = opens && typeof opens === 'object' ? Object.values(opens) : [];
-  const openStats = {
-    opens: openEntries.length,
-    openCount: openEntries.reduce((n, e) => n + (Number(e?.n) || 0), 0),
-  };
+  const openStats = openStatsFromMap(opens);
   // Keep campaign.stats in sync for the list view without rewriting on every details fetch.
-  const stats = { ...emptyStats(campaign.stats || {}), ...openStats, sent: campaign.stats?.sent || 0, failed: campaign.stats?.failed || 0 };
-  return { campaign: { ...campaign, stats }, audience: audience.length, remaining, failures };
+  const stats = {
+    ...emptyStats(campaign.stats || {}),
+    ...openStats,
+    sent: campaign.stats?.sent || 0,
+    failed: campaign.stats?.failed || 0,
+  };
+  const analytics = buildCampaignAnalytics(campaign, leads, log, opens);
+  return { campaign: { ...campaign, stats }, audience: audience.length, remaining, failures, analytics };
 }
 
 // ---------- rendering ----------
