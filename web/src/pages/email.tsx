@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router-dom'
-import { BarChart3, CircleAlert, Eye, FileUp, ImagePlus, Loader2, Mail, MailCheck, MailX, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
+import { BarChart3, CircleAlert, Eye, FileUp, ImagePlus, Info, Loader2, Mail, MailCheck, MailX, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, UserMinus, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { AssistantTabs } from '@/components/assistant-tabs'
 import { CopyField, EmptyState, PageHeader, Stat } from '@/components/common'
@@ -555,6 +555,16 @@ export function EmailCampaignsPage() {
                   {c.audienceTags.length ? ` · tags: ${c.audienceTags.join(', ')}` : ''}
                 </p>
               )}
+              {(c.remaining ?? 0) > 0 && c.status !== 'draft' && (
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="secondary" className="font-medium">
+                    {c.remaining} waiting
+                  </Badge>
+                  <span className="text-muted-foreground">
+                    Sending may have stopped for credits or daily limits — open to resume leftovers.
+                  </span>
+                </p>
+              )}
             </Link>
           ))}
         </div>
@@ -567,6 +577,8 @@ type Details = {
   campaign: Campaign
   audience: number
   remaining: number
+  unfinished?: boolean
+  pauseReason?: string
   failures: { email: string; error: string }[]
   analytics?: CampaignAnalytics
 }
@@ -803,6 +815,7 @@ export function EmailCampaignPage() {
   }
 
   // The server sends up to 1,000 per request, so keep asking until nothing is left.
+  // Provider quota/credit pauses throw; leftovers stay resumeable after the toast.
   async function send() {
     if (dirty && !(await save())) return
     const total = details?.remaining || audience.length
@@ -813,6 +826,14 @@ export function EmailCampaignPage() {
         const result = await postJson<SendResult>(`/api/email/campaigns/${id}/send`, {})
         sent += result.sentNow + result.failedNow
         setProgress({ sent, total: Math.max(total, sent + result.remaining) })
+        if (result.status === 'paused' || result.pauseReason) {
+          toast.message(
+            result.remaining > 0
+              ? `Paused with ${result.remaining} still waiting. Resume when credits or daily limits reset.`
+              : 'Sending paused.',
+          )
+          break
+        }
         if (result.remaining <= 0) {
           toast.success(`Sent to ${result.stats.sent} people${result.stats.failed ? `; ${result.stats.failed} failed` : ''}.`)
           break
@@ -889,6 +910,31 @@ export function EmailCampaignPage() {
             <Progress value={(progress.sent / Math.max(1, progress.total)) * 100} />
           </CardContent>
         </Card>
+      )}
+      {details.remaining > 0 && c.status !== 'draft' && (
+        <Alert className="mb-4">
+          <Info />
+          <AlertTitle>
+            {details.remaining} recipient{details.remaining === 1 ? '' : 's'} still waiting
+          </AlertTitle>
+          <AlertDescription>
+            <p>
+              Sending may have stopped early because of provider credits, rate limits, or daily email quotas
+              {c.pauseReason === 'provider_limit' ? ' (detected on the last attempt)' : ''}. People who already
+              received this email will not get it again. Resume when your quota resets — for example, tomorrow.
+            </p>
+            {canManage && (
+              <Button
+                size="sm"
+                className="mt-2"
+                onClick={() => setConfirmSend(true)}
+                disabled={!!progress || !status?.ready || !form.subject.trim() || !form.body.trim()}
+              >
+                <Send /> Resume sending
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       {details.failures.length > 0 && (
         <Alert className="mb-4">
@@ -1126,14 +1172,17 @@ export function EmailCampaignPage() {
       <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send to {editable ? audience.length : details.remaining} people?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {c.status === 'draft' ? 'Send' : 'Resume sending'} to {editable ? audience.length : details.remaining} people?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              From {status?.from}. People who unsubscribed or bounced are skipped. Once it starts, the campaign can’t be edited.
+              From {status?.from}. People who already received this campaign, unsubscribed, or bounced are skipped
+              {c.status === 'draft' ? '. Once it starts, the campaign can’t be edited.' : '.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void send()}>Send now</AlertDialogAction>
+            <AlertDialogAction onClick={() => void send()}>{c.status === 'draft' ? 'Send now' : 'Resume now'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

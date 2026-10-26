@@ -319,12 +319,112 @@ test('a failed batch is kept for a retry, and a bad key stops the send', async (
     mockResend(() => new Response(JSON.stringify({ message: 'API key is invalid' }), { status: 401 }));
     await assert.rejects(email.sendCampaignChunk(other.id), /API key is invalid/);
     assert.equal((await email.getCampaign(other.id)).status, 'paused');
+    assert.equal((await email.getCampaign(other.id)).pauseReason, 'config');
   });
   await inNewOrg({ RESEND_API_KEY: 're_test', EMAIL_FROM: 'a@b.com' }, async () => {
     await email.addLead({ email: 'x@x.com' });
     const campaign = await email.saveCampaign('', { subject: 'S', body: 'B' });
     await assert.rejects(email.sendCampaignChunk(campaign.id), /Postal address/);
   });
+});
+
+test('partial chunk leaves remaining > 0 and resume sends only leftovers', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    const rows = Array.from({ length: 1001 }, (_, i) => `lead${i}@x.com`).join('\n');
+    await email.importLeads({ csv: `email\n${rows}`, consent: true });
+    const campaign = await email.saveCampaign('', { subject: 'Chunk', body: 'Hello' });
+    const firstCalls = mockResend();
+    const first = await email.sendCampaignChunk(campaign.id);
+    assert.equal(first.status, 'sending');
+    assert.equal(first.sentNow, 1000);
+    assert.equal(first.remaining, 1);
+    assert.equal(firstCalls.length, 10);
+    const firstRecipients = new Set(firstCalls.flatMap((c) => c.body.map((m) => m.to[0])));
+    assert.equal(firstRecipients.size, 1000);
+
+    const details = await email.campaignDetails(campaign.id);
+    assert.equal(details.remaining, 1);
+    assert.equal(details.unfinished, true);
+    assert.equal(details.campaign.status, 'sending');
+    const listed = (await email.listCampaigns()).find((c) => c.id === campaign.id);
+    assert.equal(listed.remaining, 1);
+
+    const secondCalls = mockResend();
+    const second = await email.sendCampaignChunk(campaign.id);
+    assert.equal(second.status, 'sent');
+    assert.equal(second.sentNow, 1);
+    assert.equal(second.remaining, 0);
+    assert.equal(secondCalls.length, 1);
+    const leftover = secondCalls[0].body.map((m) => m.to[0]);
+    assert.equal(leftover.length, 1);
+    assert.equal(firstRecipients.has(leftover[0]), false, 'resume must not re-send a successful address');
+    assert.equal((await email.campaignDetails(campaign.id)).unfinished, false);
+    assert.equal((await email.listCampaigns()).find((c) => c.id === campaign.id).remaining, 0);
+  });
+});
+
+test('provider credit/quota stops leave leftovers resumeable, not permanent failures', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    await email.importLeads({ csv: 'email\na@x.com\nb@x.com\nc@x.com', consent: true });
+    const campaign = await email.saveCampaign('', { subject: 'Quota', body: 'Hello' });
+    mockResend(() => new Response(JSON.stringify({ message: 'Insufficient credits. Add credits to continue.' }), { status: 422 }));
+    await assert.rejects(email.sendCampaignChunk(campaign.id), /credits|quotas|resume/i);
+
+    const paused = await email.getCampaign(campaign.id);
+    assert.equal(paused.status, 'paused');
+    assert.equal(paused.pauseReason, 'provider_limit');
+    const details = await email.campaignDetails(campaign.id);
+    assert.equal(details.remaining, 3);
+    assert.equal(details.unfinished, true);
+    assert.equal(details.failures.length, 0);
+    assert.equal(details.pauseReason, 'provider_limit');
+    assert.equal((await email.listCampaigns()).find((c) => c.id === campaign.id).remaining, 3);
+
+    // A later resume (e.g. next day) sends only the leftover audience — nobody was stranded as failed.
+    const calls = mockResend();
+    const resumed = await email.sendCampaignChunk(campaign.id);
+    assert.equal(resumed.status, 'sent');
+    assert.equal(resumed.sentNow, 3);
+    assert.equal(resumed.remaining, 0);
+    assert.equal(calls.length, 1);
+    assert.equal((await email.campaignDetails(campaign.id)).unfinished, false);
+  });
+});
+
+test('provider limit after a successful batch keeps earlier sends and resumes the rest', async () => {
+  await inNewOrg(SETTINGS, async () => {
+    const rows = Array.from({ length: 150 }, (_, i) => `lead${i}@x.com`).join('\n');
+    await email.importLeads({ csv: `email\n${rows}`, consent: true });
+    const campaign = await email.saveCampaign('', { subject: 'Mixed', body: 'Hello' });
+    mockResend((n) => {
+      if (n === 1) return null; // first batch of 100 succeeds
+      return new Response(JSON.stringify({ message: 'Daily sending quota exceeded' }), { status: 422 });
+    });
+    await assert.rejects(email.sendCampaignChunk(campaign.id), /daily email quotas|resume/i);
+
+    const details = await email.campaignDetails(campaign.id);
+    assert.equal(details.campaign.status, 'paused');
+    assert.equal(details.campaign.pauseReason, 'provider_limit');
+    assert.equal(details.analytics.sent, 100);
+    assert.equal(details.remaining, 50);
+    assert.equal(details.failures.length, 0);
+
+    const calls = mockResend();
+    const resumed = await email.sendCampaignChunk(campaign.id);
+    assert.equal(resumed.sentNow, 50);
+    assert.equal(resumed.status, 'sent');
+    assert.equal(calls[0].body.length, 50);
+  });
+});
+
+test('isProviderLimitError recognises credit, rate-limit, and soft SMTP codes', () => {
+  assert.equal(email.isProviderLimitError({ status: 503, message: 'unavailable' }), true);
+  assert.equal(email.isProviderLimitError({ status: 429, message: 'slow down' }), true);
+  assert.equal(email.isProviderLimitError({ status: 402, message: 'pay' }), true);
+  assert.equal(email.isProviderLimitError({ status: 502, message: 'Insufficient credits' }), true);
+  assert.equal(email.isProviderLimitError({ status: 502, message: 'SMTP 421 Try again later' }), true);
+  assert.equal(email.isProviderLimitError({ status: 502, message: 'Invalid `to` field.' }), false);
+  assert.equal(email.isProviderLimitError({ status: 400, message: 'API key is invalid' }), false);
 });
 
 test('test sends go to one address and never carry a real lead’s unsubscribe link', async () => {
