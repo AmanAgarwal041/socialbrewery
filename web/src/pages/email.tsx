@@ -270,7 +270,7 @@ function ImportDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCha
         onOpenChange(v)
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Import leads from CSV</DialogTitle>
           <DialogDescription>
@@ -308,12 +308,12 @@ function ImportDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCha
               <Label htmlFor="import-tags">Tag everyone in this file</Label>
               <Input id="import-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="webinar-2026" />
             </div>
-            <label className="flex items-start gap-3 rounded-xl border p-3 text-sm">
-              <Switch checked={consent} onCheckedChange={setConsent} className="mt-0.5" />
-              <span>
+            <div className="flex items-start gap-3 rounded-xl border p-3 text-sm">
+              <Switch id="import-consent" checked={consent} onCheckedChange={setConsent} className="mt-0.5" />
+              <label htmlFor="import-consent" className="cursor-pointer leading-snug">
                 Everyone in this file agreed to receive email from us. <span className="text-muted-foreground">Required. Mailing people who didn’t agree breaks anti-spam laws and Resend’s terms.</span>
-              </span>
-            </label>
+              </label>
+            </div>
             <DialogFooter>
               <Button onClick={submit} disabled={!csv || !consent || busy}>
                 {busy && <Loader2 className="animate-spin" />} Import
