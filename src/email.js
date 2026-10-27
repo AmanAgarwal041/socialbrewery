@@ -712,20 +712,41 @@ function replaceMarkdownImages(html) {
 
 const LINK_REL = 'noopener noreferrer';
 
-/** Peel trailing sentence punctuation off a bare URL so "https://x.com." keeps the period outside the href. */
+// Conservative web TLDs (skip common file extensions like txt/js/md). Keep in sync with web/src/pages/email.tsx.
+const LINK_TLDS =
+  'com|org|net|edu|gov|io|ai|app|dev|co|me|info|biz|xyz|blog|shop|site|online|tech|cloud|page|link|studio|agency|media|news|tv|cc|us|uk|ca|au|de|fr|in|jp|nl|eu|nz|za|br|mx|es|it|se|no|fi|dk|ch|at|be|pl|cz|ie|sg|hk|kr|cn|tw|id|ph|vn|th|my|ae|il|tr|ru|ua|example';
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
+// Schemeless host or host/path/query (https assumed). Multi-label host + allowlisted TLD.
+const BARE_HOST_PATH = `(?:${HOST_LABEL}\\.)+(?:${LINK_TLDS})(?:[/?#][^\\s<]*)?`;
+const AUTO_LINK = new RegExp(`(^|[\\s(])(https?:\\/\\/[^\\s<]+|${BARE_HOST_PATH})`, 'gi');
+const BARE_HOST_PATH_ONLY = new RegExp(`^${BARE_HOST_PATH}$`, 'i');
+
+/** Peel trailing sentence punctuation so "openlit.io." / "https://x.com." keep the mark outside the href. */
 function splitBareUrl(raw) {
   let url = raw;
   let trail = '';
-  while (url.length > 8 && /[.,;:!?]$/.test(url)) {
+  while (url.length > 0 && /[.,;:!?)\]]$/.test(url)) {
+    if (url.endsWith(')')) {
+      const opens = (url.match(/\(/g) || []).length;
+      const closes = (url.match(/\)/g) || []).length;
+      if (opens >= closes) break;
+    }
+    if (url.endsWith(']')) {
+      const opens = (url.match(/\[/g) || []).length;
+      const closes = (url.match(/\]/g) || []).length;
+      if (opens >= closes) break;
+    }
     trail = url.slice(-1) + trail;
     url = url.slice(0, -1);
   }
-  // Drop a closing paren that was only balancing an opener outside the URL (e.g. "(https://x.com)").
-  if (url.endsWith(')') && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
-    trail = ')' + trail;
-    url = url.slice(0, -1);
-  }
   return { url, trail };
+}
+
+function linkFromAutolink(raw) {
+  const { url, trail } = splitBareUrl(raw);
+  if (/^https?:\/\/[^\s<]+$/i.test(url)) return { href: url, label: url, trail };
+  if (BARE_HOST_PATH_ONLY.test(url)) return { href: `https://${url}`, label: url, trail };
+  return null;
 }
 
 function anchorHtml(href, label) {
@@ -734,7 +755,7 @@ function anchorHtml(href, label) {
 
 // A small, safe Markdown subset: paragraphs, line breaks, images, **bold**, _italic_, [links](https://…) and bare links.
 // Images support merge-bound URLs/alts after merge() runs: ![{{product}}]({{hero_image|https://fallback}}).
-// Bare http(s) URLs become anchors after markdown links/images so we never double-link or link image srcs as text.
+// Autolink http(s) and schemeless hosts after markdown links/images so we never double-link or link image srcs as text.
 export function bodyHtml(body) {
   return body
     .trim()
@@ -744,11 +765,11 @@ export function bodyHtml(body) {
       // Images before links so ![alt](url) is not treated as a markdown link.
       html = replaceMarkdownImages(html);
       html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => anchorHtml(url, label));
-      // Bare URLs: only after whitespace/`(`/start, so href="…" inside <a>/<img> is skipped.
-      html = html.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, (_, pre, raw) => {
-        const { url, trail } = splitBareUrl(raw);
-        if (!/^https?:\/\/[^\s<]+$/i.test(url)) return `${pre}${raw}`;
-        return `${pre}${anchorHtml(url, url)}${trail}`;
+      // Autolink only after whitespace/`(`/start, so href="…" inside <a>/<img> is skipped. Emails (ada@host) stay plain.
+      html = html.replace(AUTO_LINK, (match, pre, raw) => {
+        const linked = linkFromAutolink(raw);
+        if (!linked) return match;
+        return `${pre}${anchorHtml(linked.href, linked.label)}${linked.trail}`;
       });
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|\W)_([^_]+)_(?=\W|$)/g, '$1<em>$2</em>');
       const trimmed = html.replace(/^(?:<br>\s*)+|(?:<br>\s*)+$/g, '').trim();
