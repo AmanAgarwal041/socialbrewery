@@ -113,6 +113,37 @@ test('bodyHtml turns bare http(s) URLs into anchors and keeps markdown links int
   assert.match(imageThenLink, /More at <a href="https:\/\/example\.com\/about" rel="noopener noreferrer">https:\/\/example\.com\/about<\/a>/);
 });
 
+test('bodyHtml autolinks schemeless hosts and host/paths as https', () => {
+  const path = email.bodyHtml('Book cal.com/aman.openlit/30min today');
+  assert.match(
+    path,
+    /Book <a href="https:\/\/cal\.com\/aman\.openlit\/30min" rel="noopener noreferrer">cal\.com\/aman\.openlit\/30min<\/a> today/,
+  );
+
+  const host = email.bodyHtml('Visit openlit.io for more');
+  assert.match(host, /Visit <a href="https:\/\/openlit\.io" rel="noopener noreferrer">openlit\.io<\/a> for more/);
+
+  const trailing = email.bodyHtml('Visit openlit.io.');
+  assert.match(trailing, /Visit <a href="https:\/\/openlit\.io" rel="noopener noreferrer">openlit\.io<\/a>\./);
+  assert.doesNotMatch(trailing, /href="https:\/\/openlit\.io\."/);
+
+  const mixed = email.bodyHtml('See https://acme.com and openlit.io plus [docs](https://acme.com/docs).');
+  assert.match(mixed, /<a href="https:\/\/acme\.com" rel="noopener noreferrer">https:\/\/acme\.com<\/a>/);
+  assert.match(mixed, /<a href="https:\/\/openlit\.io" rel="noopener noreferrer">openlit\.io<\/a>/);
+  assert.match(mixed, /<a href="https:\/\/acme\.com\/docs" rel="noopener noreferrer">docs<\/a>/);
+
+  const image = email.bodyHtml('![logo](https://cdn.example.com/logo.png)\n\nSite openlit.io');
+  assert.match(image, /<img src="https:\/\/cdn\.example\.com\/logo\.png"/);
+  assert.doesNotMatch(image, /<a href="https:\/\/cdn\.example\.com\/logo\.png"/);
+  assert.match(image, /Site <a href="https:\/\/openlit\.io" rel="noopener noreferrer">openlit\.io<\/a>/);
+
+  // Emails and dotted non-URL tokens stay plain.
+  const emailAddr = email.bodyHtml('Write ada@openlit.io or see notes.txt please');
+  assert.doesNotMatch(emailAddr, /<a href="https:\/\/openlit\.io"/);
+  assert.doesNotMatch(emailAddr, /notes\.txt<\/a>/);
+  assert.match(emailAddr, /ada@openlit\.io/);
+});
+
 test('renderEmail includes clickable bare URLs in sent campaign HTML', async () => {
   await inNewOrg(SETTINGS, async () => {
     const lead = { id: 'a'.repeat(16), email: 'ada@x.com', firstName: 'Ada' };
@@ -120,12 +151,14 @@ test('renderEmail includes clickable bare URLs in sent campaign HTML', async () 
       {
         id: 'c'.repeat(16),
         subject: 'Links',
-        body: 'Hello Ada,\n\nCheck https://acme.com/launch and [docs](https://acme.com/docs).\n\n![hero](https://cdn.example.com/h.png)',
+        body: 'Hello Ada,\n\nCheck https://acme.com/launch and [docs](https://acme.com/docs).\n\nBook cal.com/aman.openlit/30min or openlit.io.\n\n![hero](https://cdn.example.com/h.png)',
       },
       lead,
     );
     assert.match(rendered.html, /Check <a href="https:\/\/acme\.com\/launch" rel="noopener noreferrer">https:\/\/acme\.com\/launch<\/a>/);
     assert.match(rendered.html, /<a href="https:\/\/acme\.com\/docs" rel="noopener noreferrer">docs<\/a>/);
+    assert.match(rendered.html, /<a href="https:\/\/cal\.com\/aman\.openlit\/30min" rel="noopener noreferrer">cal\.com\/aman\.openlit\/30min<\/a>/);
+    assert.match(rendered.html, /<a href="https:\/\/openlit\.io" rel="noopener noreferrer">openlit\.io<\/a>\./);
     assert.match(rendered.html, /<img src="https:\/\/cdn\.example\.com\/h\.png"/);
     assert.doesNotMatch(rendered.html, /<a href="https:\/\/cdn\.example\.com\/h\.png"/);
   });

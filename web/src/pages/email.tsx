@@ -68,24 +68,48 @@ function merge(template: string, lead: Partial<Lead>) {
 }
 
 // The preview shows the same light formatting the email gets: images, **bold**, [label](url), and bare links.
+// Keep in sync with src/email.js bodyHtml autolink helpers.
+const LINK_TLDS =
+  'com|org|net|edu|gov|io|ai|app|dev|co|me|info|biz|xyz|blog|shop|site|online|tech|cloud|page|link|studio|agency|media|news|tv|cc|us|uk|ca|au|de|fr|in|jp|nl|eu|nz|za|br|mx|es|it|se|no|fi|dk|ch|at|be|pl|cz|ie|sg|hk|kr|cn|tw|id|ph|vn|th|my|ae|il|tr|ru|ua|example'
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?'
+const BARE_HOST_PATH = `(?:${HOST_LABEL}\\.)+(?:${LINK_TLDS})(?:[/?#][^\\s<]*)?`
+const BARE_HOST_PATH_ONLY = new RegExp(`^${BARE_HOST_PATH}$`, 'i')
+const FORMATTED_SPLIT = new RegExp(
+  `(!\\[[^\\]]*\\]\\([^)]+\\)|\\*\\*[^*]+\\*\\*|\\[[^\\]]+\\]\\(https?:\\/\\/[^\\s)]+\\)|https?:\\/\\/[^\\s<]+|${BARE_HOST_PATH})`,
+  'gi',
+)
+
 /** Peel trailing sentence punctuation so bare URLs match outbound `bodyHtml` linking. */
 function splitBareUrl(raw: string) {
   let url = raw
   let trail = ''
-  while (url.length > 8 && /[.,;:!?]$/.test(url)) {
+  while (url.length > 0 && /[.,;:!?)\]]$/.test(url)) {
+    if (url.endsWith(')')) {
+      const opens = (url.match(/\(/g) || []).length
+      const closes = (url.match(/\)/g) || []).length
+      if (opens >= closes) break
+    }
+    if (url.endsWith(']')) {
+      const opens = (url.match(/\[/g) || []).length
+      const closes = (url.match(/\]/g) || []).length
+      if (opens >= closes) break
+    }
     trail = url.slice(-1) + trail
-    url = url.slice(0, -1)
-  }
-  if (url.endsWith(')') && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
-    trail = ')' + trail
     url = url.slice(0, -1)
   }
   return { url, trail }
 }
 
+function linkFromAutolink(raw: string) {
+  const { url, trail } = splitBareUrl(raw)
+  if (/^https?:\/\/[^\s<]+$/i.test(url)) return { href: url, label: url, trail }
+  if (BARE_HOST_PATH_ONLY.test(url)) return { href: `https://${url}`, label: url, trail }
+  return null
+}
+
 function Formatted({ text }: { text: string }) {
-  // Keep in sync with src/email.js bodyHtml: images, bold, markdown links, then bare http(s) URLs.
-  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<]+)/g)
+  // Keep in sync with src/email.js bodyHtml: images, bold, markdown links, then http(s) / schemeless hosts.
+  const parts = text.split(FORMATTED_SPLIT)
   return (
     <>
       {parts.map((part, i) => {
@@ -104,18 +128,16 @@ function Formatted({ text }: { text: string }) {
               {link[1]}
             </a>
           )
-        if (/^https?:\/\//.test(part)) {
-          const { url, trail } = splitBareUrl(part)
-          if (!/^https?:\/\/[^\s<]+$/i.test(url)) return part
+        const linked = linkFromAutolink(part)
+        if (linked)
           return (
             <span key={i}>
-              <a href={url} target="_blank" rel="noopener noreferrer" className="text-p1-ink underline">
-                {url}
+              <a href={linked.href} target="_blank" rel="noopener noreferrer" className="text-p1-ink underline">
+                {linked.label}
               </a>
-              {trail}
+              {linked.trail}
             </span>
           )
-        }
         return part
       })}
     </>
