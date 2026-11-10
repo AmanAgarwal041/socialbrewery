@@ -82,6 +82,80 @@ export async function deleteRun(id: string) {
   await chrome.storage.local.set({ deletedRuns: [...((deletedRuns as string[]) || []), id].slice(-500) })
 }
 
+// ---------- Reddit leads found by research ----------
+
+export type LeadStatus = 'new' | 'engaged' | 'won' | 'dismissed'
+export const LEAD_STATUSES: LeadStatus[] = ['new', 'engaged', 'won', 'dismissed']
+
+export type Lead = {
+  /** username|postId, lowercased: the same person and post is one lead everywhere. */
+  key: string
+  /** The server's id once synced. */
+  id?: string
+  username: string
+  subreddit: string
+  postUrl: string
+  postTitle: string
+  excerpt: string
+  fit: 'high' | 'medium' | 'low'
+  reason: string
+  signals: string[]
+  status: LeadStatus
+  notes: string
+  createdAt: number
+  updatedAt: number
+}
+
+const MAX_LEADS = 2000
+
+export function leadKey(username: string, postUrl: string) {
+  return `${username.toLowerCase()}|${postUrl.match(/\/comments\/([a-z0-9]+)/i)?.[1]?.toLowerCase() || ''}`
+}
+
+export async function listLeads(): Promise<Lead[]> {
+  const { leads } = await chrome.storage.local.get('leads')
+  return Array.isArray(leads) ? (leads as Lead[]) : []
+}
+
+export async function replaceLeads(leads: Lead[]) {
+  await chrome.storage.local.set({ leads: leads.sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_LEADS) })
+}
+
+/** Adds leads or updates the saved one with the same key. Saving again never moves a lead back to "new". */
+export type LeadInput = Pick<Lead, 'username' | 'subreddit' | 'postUrl' | 'postTitle' | 'excerpt' | 'fit' | 'reason' | 'signals'> & Partial<Pick<Lead, 'status' | 'notes'>>
+
+export async function upsertLeads(items: LeadInput[]) {
+  const byKey = new Map((await listLeads()).map((l) => [l.key, l]))
+  let added = 0
+  for (const item of items) {
+    const key = leadKey(item.username, item.postUrl)
+    const existing = byKey.get(key)
+    const now = Date.now()
+    if (existing) {
+      byKey.set(key, { ...existing, ...item, key, status: item.status && item.status !== 'new' ? item.status : existing.status, notes: item.notes || existing.notes, reason: item.reason || existing.reason, updatedAt: now })
+    } else {
+      byKey.set(key, { status: 'new', notes: '', ...item, key, createdAt: now, updatedAt: now })
+      added++
+    }
+  }
+  await replaceLeads([...byKey.values()])
+  return { added, updated: items.length - added }
+}
+
+export async function updateLead(key: string, patch: Partial<Pick<Lead, 'status' | 'fit' | 'reason' | 'notes'>>) {
+  const leads = await listLeads()
+  const lead = leads.find((l) => l.key === key || l.id === key)
+  if (!lead) return null
+  Object.assign(lead, patch, { updatedAt: Date.now() })
+  await replaceLeads(leads)
+  return lead
+}
+
+export async function removeLeads(keys: string[]) {
+  const gone = new Set(keys)
+  await replaceLeads((await listLeads()).filter((l) => !gone.has(l.key)))
+}
+
 // ---------- media ----------
 
 export type MediaFile = { id: string; name: string; mime: string; size: number; source: 'upload' | 'grok'; createdAt: number }

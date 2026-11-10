@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, KeyRound, MousePointerClick, Puzzle, ShieldCheck } from 'lucide-react'
+import { Download, KeyRound, MousePointerClick, Puzzle, ShieldCheck, Users } from 'lucide-react'
 import { CopyField, PageHeader } from '@/components/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -36,7 +36,7 @@ export function ExtensionPage() {
         title="Post from your own browser"
         icon={Puzzle}
         iconClass="bg-palette text-ink"
-        description="Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in the tabs you’re already signed in to. No connections to set up, and nothing goes live until you approve it."
+        description="Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in the tabs you’re already signed in to. It can also search Reddit for people who need what you make. No connections to set up, and nothing goes live until you approve it."
         actions={
           <Button asChild>
             <a href={ZIP} download="socialbrewery-extension.zip">
@@ -79,7 +79,7 @@ export function ExtensionPage() {
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
               It runs on your own Anthropic or xAI key, which stays in your browser. Sign in to Socialbrewery only if you want your runs saved: signed in here, the
-              extension is signed in too, and what it posts shows up in your organisation’s Posts.
+              extension is signed in too, what it posts shows up in your organisation’s Posts, and the Reddit leads it finds show up under Reddit → Leads.
             </CardContent>
           </Card>
           <Card>
@@ -91,6 +91,17 @@ export function ExtensionPage() {
             <CardContent className="text-sm text-muted-foreground">
               The agent fills everything in, then stops with a screenshot before it clicks Post, Share, Publish, or Send. Chrome shows a “debugging this browser” bar
               while it works in a tab.
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="size-4" /> Reddit lead research
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              Ask it to find leads: it picks communities, searches public posts for people asking for what you make, reads their public activity, and saves each lead
+              with why they fit. It reads Reddit in your own browser, so no Reddit API keys are needed, and it never messages anyone.
             </CardContent>
           </Card>
           <Card>

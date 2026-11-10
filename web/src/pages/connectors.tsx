@@ -48,6 +48,14 @@ const MCP_TOOLS = [
   'comment_reddit',
   'list_reddit_subreddits',
   'delete_reddit_post',
+  'get_research_skill',
+  'find_subreddits',
+  'search_reddit',
+  'get_reddit_thread',
+  'research_reddit_user',
+  'save_reddit_leads',
+  'list_reddit_leads',
+  'update_reddit_lead',
 ]
 
 type AiClient = { id: 'grok' | 'claude'; name: string; where: string; steps: string[]; extra?: { label: string; command: (url: string) => string } }

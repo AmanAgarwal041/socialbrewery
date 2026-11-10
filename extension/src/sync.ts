@@ -1,7 +1,7 @@
 // Signed in, runs are copied to the Socialbrewery organisation (PUT /api/extension/runs) and come
 // back from it, so they follow the person to other browsers. Signed out, nothing leaves this browser.
 
-import { listRuns, replaceRuns, type Run } from './storage'
+import { leadKey, listLeads, listRuns, replaceLeads, replaceRuns, type Lead, type Run } from './storage'
 
 const MAX_BATCH_BYTES = 800_000
 
@@ -60,4 +60,49 @@ export async function syncRuns(serverUrl: string, getToken: () => Promise<string
   await replaceRuns([...byId.values()])
   await chrome.storage.local.set({ syncState: { pushedAt: startedAt }, deletedRuns: [] })
   return changed.length
+}
+
+// ---------- Reddit leads ----------
+// Leads the agent saved here go to the organisation's Reddit lead list (POST /api/reddit/leads),
+// and the organisation's list comes back, so the dashboard and every browser see the same leads.
+// The newer copy of each lead wins; a lead an admin deleted in the dashboard disappears here too.
+
+type ServerLead = Omit<Lead, 'key' | 'createdAt'> & { id: string; createdAt: string }
+
+async function leadsCall(serverUrl: string, token: string, leads?: Lead[]) {
+  const url = `${serverUrl.replace(/\/$/, '')}/api/reddit/leads`
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+  const res = leads
+    ? await fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'extension', leads }) })
+    : await fetch(url, { headers })
+  const data = await res.json().catch(() => ({}))
+  if (res.status === 409) throw new Error('Choose an organisation in Socialbrewery to save leads.')
+  if (!res.ok) throw new Error(data.error || `Saving leads failed (${res.status}).`)
+  return data as { leads?: ServerLead[] }
+}
+
+export async function syncLeads(serverUrl: string, getToken: () => Promise<string | null>): Promise<void> {
+  const token = await getToken()
+  if (!token) return
+  const startedAt = Date.now()
+  const { leadSyncAt } = await chrome.storage.local.get('leadSyncAt')
+  const since = Number(leadSyncAt) || 0
+  const changed = (await listLeads()).filter((l) => l.updatedAt > since)
+  for (let i = 0; i < changed.length; i += 200) await leadsCall(serverUrl, (await getToken()) || token, changed.slice(i, i + 200))
+  const server = (await leadsCall(serverUrl, (await getToken()) || token)).leads || []
+
+  const onServer = new Set(server.map((l) => l.id))
+  const byKey = new Map((await listLeads()).filter((l) => !l.id || onServer.has(l.id)).map((l) => [l.key, l]))
+  for (const remote of server) {
+    const key = leadKey(remote.username, remote.postUrl)
+    const local = byKey.get(key)
+    const updatedAt = Number(remote.updatedAt) || 0
+    if (!local || updatedAt > local.updatedAt) {
+      byKey.set(key, { ...remote, key, signals: remote.signals || [], createdAt: Date.parse(remote.createdAt) || updatedAt, updatedAt })
+    } else if (!local.id) {
+      byKey.set(key, { ...local, id: remote.id })
+    }
+  }
+  await replaceLeads([...byKey.values()])
+  await chrome.storage.local.set({ leadSyncAt: startedAt })
 }

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, CircleStop, Clapperboard, History, KeyRound, Loader2, Paperclip, Plus, Settings as SettingsIcon, ShieldCheck, Trash2, X } from 'lucide-react'
+import { ArrowUp, Check, CircleStop, Clapperboard, Download, ExternalLink, History, KeyRound, Loader2, Paperclip, Plus, Search, Settings as SettingsIcon, ShieldCheck, Trash2, Users, X } from 'lucide-react'
 import { AgentSession } from '@/agent/run'
 import { CLAUDE_MODELS } from '@/agent/providers'
 import type { ApprovalRequest } from '@/agent/tools'
-import { syncRuns } from '@/sync'
-import { addFile, deleteRun, listFiles, listRuns, loadSettings, removeFile, saveRun, saveSettings, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
+import { syncLeads, syncRuns } from '@/sync'
+import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
 import { useAccount } from './account'
 
-type View = 'chat' | 'history' | 'settings'
+type View = 'chat' | 'history' | 'leads' | 'settings'
 type Pending = ApprovalRequest & { resolve: (ok: boolean) => void }
 
 function cn(...parts: (string | false | null | undefined)[]) {
@@ -208,6 +208,102 @@ function HistoryView({ onOpen, onChanged }: { onOpen: (run: Run) => void; onChan
   )
 }
 
+// ---------- leads ----------
+
+const FIT_STYLE: Record<Lead['fit'], string> = { high: 'bg-p4-soft text-p4-ink', medium: 'bg-p2-soft text-p2-ink', low: 'bg-muted text-muted-foreground' }
+
+function csvCell(value: string) {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+function downloadCsv(leads: Lead[]) {
+  const head = ['username', 'subreddit', 'fit', 'status', 'reason', 'post_title', 'post_url', 'notes']
+  const rows = leads.map((l) => [l.username, l.subreddit, l.fit, l.status, l.reason, l.postTitle, l.postUrl, l.notes].map((v) => csvCell(String(v || ''))).join(','))
+  const url = URL.createObjectURL(new Blob([[head.join(','), ...rows].join('\n')], { type: 'text/csv' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `reddit-leads-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function LeadsView({ version, signedIn, onChanged, onAsk }: { version: number; signedIn: boolean; onChanged: () => void; onAsk: (text: string) => void }) {
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [filter, setFilter] = useState<LeadStatus | 'open'>('open')
+  const refresh = useCallback(() => listLeads().then(setLeads), [])
+  useEffect(() => {
+    refresh()
+  }, [refresh, version])
+  const shown = leads.filter((l) => (filter === 'open' ? l.status !== 'dismissed' : l.status === filter))
+
+  async function setStatus(lead: Lead, status: LeadStatus) {
+    await updateLead(lead.key, { status })
+    await refresh()
+    onChanged()
+  }
+
+  return (
+    <div className="space-y-2 p-3">
+      <div className="flex items-center gap-2">
+        <select className={cn(inputClass, 'w-auto flex-1')} value={filter} onChange={(e) => setFilter(e.target.value as LeadStatus | 'open')} aria-label="Show">
+          <option value="open">Open ({leads.filter((l) => l.status !== 'dismissed').length})</option>
+          {LEAD_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s[0].toUpperCase() + s.slice(1)} ({leads.filter((l) => l.status === s).length})
+            </option>
+          ))}
+        </select>
+        <Button variant="outline" className="px-2" aria-label="Download as CSV" disabled={!shown.length} onClick={() => downloadCsv(shown)}>
+          <Download />
+        </Button>
+      </div>
+      {!leads.length && (
+        <div className="space-y-2 rounded-xl border border-border bg-card p-4">
+          <p className="font-medium">No leads yet.</p>
+          <p className="text-xs text-muted-foreground">Ask the agent to look for people on Reddit who need what you make. It searches public posts in this browser, explains why each person fits, and saves the best ones here. It never messages anyone.</p>
+          <Button variant="outline" onClick={() => onAsk('Find Reddit leads for my product: <what it does, who it is for>. Look in the past month.')}>
+            <Search /> Start lead research
+          </Button>
+        </div>
+      )}
+      {shown.map((lead) => (
+        <div key={lead.key} className="space-y-1.5 rounded-xl border border-border bg-card p-2.5">
+          <div className="flex items-center gap-1.5">
+            <a className="min-w-0 truncate font-medium underline-offset-2 hover:underline" href={`https://www.reddit.com/user/${lead.username}/`} target="_blank" rel="noreferrer">
+              u/{lead.username}
+            </a>
+            {lead.subreddit && <span className="truncate text-xs text-muted-foreground">r/{lead.subreddit}</span>}
+            <span className={cn('ml-auto shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium', FIT_STYLE[lead.fit])}>{lead.fit}</span>
+          </div>
+          {lead.reason && <p className="text-xs">{lead.reason}</p>}
+          {lead.postTitle && <p className="truncate text-xs text-muted-foreground">“{lead.postTitle}”</p>}
+          <div className="flex items-center gap-1.5">
+            <select className={cn(inputClass, 'w-auto py-1 text-xs')} value={lead.status} onChange={(e) => void setStatus(lead, e.target.value as LeadStatus)} aria-label={`Status of u/${lead.username}`}>
+              {LEAD_STATUSES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+            <Button variant="ghost" className="px-2 text-xs" onClick={() => onAsk(`Look at u/${lead.username} and tell me whether they are a good lead and how I could help them in public.${lead.postUrl ? ` They came from ${lead.postUrl}` : ''}`)}>
+              Research
+            </Button>
+            {lead.postUrl && (
+              <a href={lead.postUrl} target="_blank" rel="noreferrer" aria-label="Open the post" className="ml-auto text-muted-foreground">
+                <ExternalLink className="size-3.5" />
+              </a>
+            )}
+            {!lead.id && !signedIn && (
+              <button aria-label="Remove lead" className={cn('text-muted-foreground', !lead.postUrl && 'ml-auto')} onClick={() => removeLeads([lead.key]).then(refresh)}>
+                <Trash2 className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      {leads.length > 0 && <p className="text-[11px] text-muted-foreground">{signedIn ? 'Leads are saved to your organisation and shown on the Reddit page in Socialbrewery.' : 'Leads stay in this browser. Sign in to share them with your team.'}</p>}
+    </div>
+  )
+}
+
 // ---------- app ----------
 
 /** The tab the user is looking at; if that is this panel opened as a page, their most recent website tab. */
@@ -228,6 +324,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
   const [pending, setPending] = useState<Pending | null>(null)
   const [error, setError] = useState('')
   const [syncNote, setSyncNote] = useState('')
+  const [leadsVersion, setLeadsVersion] = useState(0)
   const session = useRef<AgentSession | null>(null)
   const runRef = useRef<Run | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -249,6 +346,8 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
     if (!account.signedIn) return
     try {
       await syncRuns(settings.serverUrl, account.getToken)
+      await syncLeads(settings.serverUrl, account.getToken)
+      setLeadsVersion((v) => v + 1)
       setSyncNote('Saved')
     } catch (err) {
       setSyncNote((err as Error).message)
@@ -299,6 +398,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         onAction: (t, isError) => push({ kind: 'action', text: t, at: Date.now(), error: isError }),
         onProgress: setProgress,
         onPost: (post) => update((r) => ({ ...r, posts: [...r.posts, post] })),
+        onLeads: () => setLeadsVersion((v) => v + 1),
         approve: (request) =>
           new Promise<boolean>((resolve) => {
             setPending({
@@ -363,6 +463,9 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
           <Button variant="ghost" className="px-2" aria-label="New chat" onClick={newChat}>
             <Plus />
           </Button>
+          <Button variant="ghost" className={cn('px-2', view === 'leads' && 'bg-muted')} aria-label="Leads" onClick={() => setView(view === 'leads' ? 'chat' : 'leads')}>
+            <Users />
+          </Button>
           <Button variant="ghost" className={cn('px-2', view === 'history' && 'bg-muted')} aria-label="History" onClick={() => setView(view === 'history' ? 'chat' : 'history')}>
             <History />
           </Button>
@@ -383,6 +486,18 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         {view === 'settings' && <SettingsView settings={settings} onChange={setSettings} />}
+        {view === 'leads' && (
+          <LeadsView
+            version={leadsVersion}
+            signedIn={account.signedIn}
+            onChanged={() => void sync()}
+            onAsk={(text) => {
+              if (!running) newChat()
+              setInput(text)
+              setView('chat')
+            }}
+          />
+        )}
         {view === 'history' && (
           <HistoryView
             onOpen={(r) => {
@@ -399,14 +514,16 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
           <div className="space-y-2 p-3">
             {!run && (
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-                <p className="font-medium">Tell {settings.provider === 'claude' ? 'Claude' : 'Grok'} what to post.</p>
+                <p className="font-medium">Tell {settings.provider === 'claude' ? 'Claude' : 'Grok'} what to post, or who to find.</p>
                 <p className="text-muted-foreground">
-                  It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode. It fills everything in, then waits for you to approve before anything is published.
+                  It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode. It fills everything in, then waits for you to approve before anything is published. It can also search Reddit for people who need what you make and keep them under Leads.
                 </p>
                 <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
                   <li>“Write a LinkedIn post about our launch and post it.”</li>
                   <li>“Make an 8-second clip of steam over coffee and upload it to YouTube as an unlisted Short.”</li>
                   <li>“Post this thread on X: …”</li>
+                  <li>“Find Reddit leads for our open-source LLM observability tool in r/LocalLLaMA and r/devops.”</li>
+                  <li>“Look at u/… and tell me whether they’d be a good fit.”</li>
                 </ul>
                 {keyMissing && (
                   <Button variant="outline" onClick={() => setView('settings')}>
@@ -452,7 +569,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                     void send()
                   }
                 }}
-                placeholder={keyMissing ? 'Add your API key in Settings first' : 'What should it post, and where?'}
+                placeholder={keyMissing ? 'Add your API key in Settings first' : 'What should it post, or who should it find?'}
                 className="block w-full resize-none bg-transparent px-3 py-2 outline-none"
               />
               <div className="flex items-center gap-1 px-2 pb-2">

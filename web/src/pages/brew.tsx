@@ -62,6 +62,14 @@ const TOOL_META: Record<string, { icon: Icon; slot: Slot; label: string }> = {
   reddit_subreddit_rules: { icon: RedditIcon, slot: 'p3', label: 'Subreddit rules' },
   post_reddit: { icon: RedditIcon, slot: 'p3', label: 'Reddit post' },
   comment_reddit: { icon: MessageSquareText, slot: 'p3', label: 'Reddit comment' },
+  get_research_skill: { icon: RedditIcon, slot: 'p3', label: 'Research skill' },
+  find_subreddits: { icon: RedditIcon, slot: 'p3', label: 'Find subreddits' },
+  search_reddit: { icon: RedditIcon, slot: 'p3', label: 'Reddit search' },
+  get_reddit_thread: { icon: MessageSquareText, slot: 'p3', label: 'Reddit thread' },
+  research_reddit_user: { icon: RedditIcon, slot: 'p3', label: 'Reddit user' },
+  save_reddit_leads: { icon: RedditIcon, slot: 'p3', label: 'Saved leads' },
+  list_reddit_leads: { icon: RedditIcon, slot: 'p3', label: 'Reddit leads' },
+  update_reddit_lead: { icon: RedditIcon, slot: 'p3', label: 'Lead updated' },
 }
 
 const SUGGESTIONS: { network: NetworkId | 'any'; title: string; prompt: string }[] = [
@@ -110,6 +118,12 @@ const SUGGESTIONS: { network: NetworkId | 'any'; title: string; prompt: string }
     title: 'Share on Reddit',
     prompt:
       'Read the rules of r/selfhosted first. If self-promotion is allowed, write a genuine text post (not an ad) about the tool I built, with a plain title, and show me the draft before posting. Tool: ',
+  },
+  {
+    network: 'reddit',
+    title: 'Find Reddit leads',
+    prompt:
+      'Find people on Reddit from the past month who are asking for or comparing tools like mine. Suggest a few subreddits first, then search, qualify each person, and save the best as leads. Never message anyone. My product: ',
   },
   {
     network: 'any',

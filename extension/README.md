@@ -11,6 +11,13 @@ click **Approve** in the side panel.
   agent did, what got posted) are saved to your organisation and follow you to other browsers, and
   posts appear in the dashboard's Posts list. The extension shares the dashboard's Clerk session:
   sign in on the dashboard and the extension is signed in too.
+- **Reddit lead research.** Ask it to find people who need what you make. It follows the shared
+  research skills (`src/reddit-skills.js`): it picks communities, searches public posts with
+  buying-intent queries, reads threads and a user's public activity, and saves each lead with why
+  they fit under **Leads** in the panel (CSV export). It reads Reddit's public JSON from inside a
+  reddit.com tab, paced at one read every 1.5 seconds, so no Reddit API keys are needed. Signed in,
+  leads sync with the organisation's list (dashboard: Connectors → Reddit → Leads). It never
+  messages, follows, or votes; a public reply goes through the same approval as any post.
 - **Claude or Grok.** Switch at the top of the panel. Claude runs on Claude Opus 5.5 by default
   (adaptive thinking, medium effort, with Anthropic's default refusal fallback); Grok on `grok-4.6`.
   Grok Imagine can also generate a vertical clip to upload.
@@ -52,6 +59,8 @@ below.
 - `browser.ts` sends real mouse and keyboard input through the Chrome debugger (Chrome shows a
   "debugging this browser" bar while the agent works), and `page.ts` reads the page, including
   shadow DOM. Native file pickers are intercepted; files go straight into the page's file input.
+- `research.ts` holds the Reddit research tools (search, thread, user, leads). They only read; the
+  page fetch is `fetchRedditJson` in `page.ts`.
 - `playbooks.ts` holds per-site hints and each site's publish buttons. Sites change their layouts;
   the agent reads the page before it acts, but update a playbook when a flow changes.
 - Files you attach or Grok generates live in IndexedDB in this browser and are never uploaded to

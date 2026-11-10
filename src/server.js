@@ -128,6 +128,7 @@ import {
   subredditDetails,
   trackRedditPost,
 } from './reddit.js';
+import { deleteRedditLead, listRedditLeads, saveRedditLeads, searchReddit, updateRedditLead } from './reddit-research.js';
 
 // Created on first use: Workers forbid random values while a module loads.
 let bootValue = '';
@@ -1162,6 +1163,36 @@ async function orgRoute(req, res, url, ctx) {
   if (req.method === 'POST' && pathname === '/api/reddit/track') {
     const body = await readJsonBody(req);
     sendJson(res, 201, { post: await trackRedditPost({ link: body.link, title: body.title, text: body.text }) });
+    return;
+  }
+
+  // Reddit leads: anyone in the organisation can save and update them (the extension syncs its own
+  // here); deleting is for admins, like deleting email leads.
+  if (pathname === '/api/reddit/leads') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, { leads: await listRedditLeads({ status: url.searchParams.get('status') || undefined }) });
+      return;
+    }
+    if (req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const source = body.source === 'extension' ? 'extension' : 'dashboard';
+      sendJson(res, 200, await saveRedditLeads(Array.isArray(body.leads) ? body.leads : [body], source));
+      return;
+    }
+  }
+  const leadMatch = pathname.match(/^\/api\/reddit\/leads\/([a-f0-9]{16})$/);
+  if (leadMatch && req.method === 'PATCH') {
+    sendJson(res, 200, { lead: await updateRedditLead(leadMatch[1], await readJsonBody(req)) });
+    return;
+  }
+  if (leadMatch && req.method === 'DELETE') {
+    requireRole(currentContext(), 'admin');
+    sendJson(res, 200, await deleteRedditLead(leadMatch[1]));
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/reddit/search') {
+    sendJson(res, 200, await searchReddit({ query: url.searchParams.get('q') || '', subreddit: url.searchParams.get('subreddit') || '', sort: url.searchParams.get('sort') || undefined, time: url.searchParams.get('time') || undefined }));
     return;
   }
 
