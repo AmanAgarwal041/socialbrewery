@@ -9,6 +9,7 @@ import { listSlackChannels } from './slack.js';
 import { publishInstagramReel } from './instagram.js';
 import { getMedia, loadHistory, saveHistory } from './store.js';
 import { cfg } from './context.js';
+import { REDDIT_RESEARCH_TOOLS, REDDIT_RESEARCH_TOOL_NAMES, runRedditResearchTool } from './reddit-research.js';
 
 const SYSTEM_TEMPLATE = `You are {{NAME}}, the posting agent inside Socialbrewery. You help one person publish to the channels they connected: YouTube Shorts, LinkedIn, Instagram Reels, X, a Hashnode blog, Slack, and Reddit.
 
@@ -33,6 +34,13 @@ You can:
 - comment_reddit: comment on a Reddit post or reply to a comment, using its link.
 - If Reddit API keys are not connected, reddit_subreddit_rules returns a rulesUrl and post_reddit returns a submitUrl instead of posting. Share both links and say plainly that the person still has to click Post on Reddit. Never claim it was posted.
 - Use generate_short_video first when they want a new clip for LinkedIn, Instagram, or X.
+
+Reddit research (finding leads and potential users):
+- get_research_skill: read reddit-lead-research before looking for leads, and reddit-user-research before judging one user. Follow the skill's method and limits.
+- find_subreddits, search_reddit, get_reddit_thread, research_reddit_user: read public Reddit. Results include intent signals; judge each one yourself.
+- save_reddit_leads, list_reddit_leads, update_reddit_lead: the organisation's lead list (shown on the Reddit page under Leads).
+- Without Reddit API keys these return a searchUrl or url instead of results. Share the link, and mention that the Socialbrewery Chrome extension can do the research in their own browser.
+- Never send direct messages or contact people in bulk. Engaging means one helpful public comment the person approved, with affiliation disclosed.
 
 Rules:
 - If they attached a video, use that mediaId unless they asked for a new generated clip.
@@ -363,6 +371,7 @@ const TOOLS = [
       },
     },
   },
+  ...REDDIT_RESEARCH_TOOLS.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })),
 ];
 
 function parseArgs(raw) {
@@ -462,7 +471,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
   history.display.push(userItem);
   await saveHistory(history);
 
-  for (let step = 0; step < 5; step += 1) {
+  for (let step = 0; step < 10; step += 1) {
     if (signal?.aborted) throw new Error('Stopped.');
     send('status', { text: step === 0 ? `${agentName(provider)} is thinking…` : `${agentName(provider)} is continuing…` });
     const messages = [{ role: 'system', content: systemPrompt(provider) }, ...history.model];
@@ -543,6 +552,13 @@ function statusFor(name) {
   if (name === 'reddit_subreddit_rules') return 'Reading the subreddit rules…';
   if (name === 'post_reddit') return 'Posting to Reddit…';
   if (name === 'comment_reddit') return 'Commenting on Reddit…';
+  if (name === 'get_research_skill') return 'Reading the research skill…';
+  if (name === 'find_subreddits') return 'Finding subreddits…';
+  if (name === 'search_reddit') return 'Searching Reddit…';
+  if (name === 'get_reddit_thread') return 'Reading the thread…';
+  if (name === 'research_reddit_user') return 'Reading the user\'s public activity…';
+  if (name === 'save_reddit_leads' || name === 'update_reddit_lead') return 'Saving leads…';
+  if (name === 'list_reddit_leads') return 'Reading saved leads…';
   return 'Working…';
 }
 
@@ -584,6 +600,15 @@ function summarize(name, result) {
     return result.commentError ? `${posted} ${result.commentError}` : posted;
   }
   if (name === 'comment_reddit') return result.url ? `Commented on Reddit: ${result.url}` : 'Commented on Reddit.';
+  if (typeof result === 'string') return 'Read the research skill.';
+  if (result.manual) return `Reddit API keys are not connected. Open on Reddit: ${result.searchUrl || result.url}`;
+  if (name === 'find_subreddits') return `Found ${result.subreddits?.length || 0} subreddits.`;
+  if (name === 'search_reddit') return `Found ${result.posts?.length || 0} posts${result.subreddit ? ` in r/${result.subreddit}` : ''}.`;
+  if (name === 'get_reddit_thread') return `Read the thread (${result.comments?.length || 0} comments).`;
+  if (name === 'research_reddit_user') return result.suspended ? `u/${result.username} is suspended.` : `Read u/${result.username}'s recent activity.`;
+  if (name === 'save_reddit_leads') return `Saved ${result.added} new lead${result.added === 1 ? '' : 's'}${result.updated ? `, updated ${result.updated}` : ''}.`;
+  if (name === 'list_reddit_leads') return `${result.total} saved leads.`;
+  if (name === 'update_reddit_lead') return `Updated the lead for u/${result.username}.`;
   return 'Done.';
 }
 
@@ -683,5 +708,6 @@ async function runTool(name, args, { madeForKids, send, signal }) {
   if (name === 'comment_reddit') {
     return commentOnReddit({ post: args.post, text: args.text });
   }
+  if (REDDIT_RESEARCH_TOOL_NAMES.has(name)) return runRedditResearchTool(name, args, 'agent');
   return { error: `Unknown tool: ${name}` };
 }

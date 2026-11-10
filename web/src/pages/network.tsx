@@ -27,8 +27,9 @@ import { cn } from '@/lib/utils'
 import { PostRow } from '@/pages/overview'
 import { NetworkAnalysis } from '@/pages/network-analysis'
 import { NetworkCompose, NetworkPosts } from '@/pages/network-posts'
+import { RedditLeads } from '@/pages/reddit-leads'
 
-const TABS = ['overview', 'posts', 'compose', 'analysis', 'connection'] as const
+const TABS = ['overview', 'posts', 'compose', 'leads', 'analysis', 'connection'] as const
 type Tab = (typeof TABS)[number]
 
 const SETUP: Record<NetworkId, { steps: React.ReactNode[]; docs: { label: string; href: string } }> = {
@@ -519,7 +520,7 @@ export function NetworkPage() {
   const navigate = useNavigate()
   const network = networkById[id as NetworkId]
   if (!network) return <Navigate to="/connectors" replace />
-  const active: Tab = TABS.includes(tab as Tab) ? (tab as Tab) : 'overview'
+  const active: Tab = TABS.includes(tab as Tab) && (tab !== 'leads' || network.id === 'reddit') ? (tab as Tab) : 'overview'
 
   return (
     <div>
@@ -529,6 +530,7 @@ export function NetworkPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="posts">Posts</TabsTrigger>
           <TabsTrigger value="compose">Compose</TabsTrigger>
+          {network.id === 'reddit' && <TabsTrigger value="leads">Leads</TabsTrigger>}
           <TabsTrigger value="analysis">Analysis</TabsTrigger>
           <TabsTrigger value="connection">Connection</TabsTrigger>
         </TabsList>
@@ -541,6 +543,11 @@ export function NetworkPage() {
         <TabsContent value="compose">
           <NetworkCompose network={network} />
         </TabsContent>
+        {network.id === 'reddit' && (
+          <TabsContent value="leads">
+            <RedditLeads />
+          </TabsContent>
+        )}
         <TabsContent value="analysis">
           <NetworkAnalysis network={network} />
         </TabsContent>

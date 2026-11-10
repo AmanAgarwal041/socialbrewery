@@ -66,6 +66,23 @@ export type RedditDetails = RedditSubreddit & {
   rules: { title: string; description: string }[]
   flairs: { id: string; text: string }[]
 }
+export type RedditLeadStatus = 'new' | 'engaged' | 'won' | 'dismissed'
+export type RedditLead = {
+  id: string
+  username: string
+  subreddit: string
+  postUrl: string
+  postTitle: string
+  excerpt: string
+  fit: 'high' | 'medium' | 'low'
+  reason: string
+  signals: string[]
+  status: RedditLeadStatus
+  notes: string
+  source: string
+  createdAt: string
+  updatedAt: number
+}
 export type RedditStat = {
   id: string
   redditId: string

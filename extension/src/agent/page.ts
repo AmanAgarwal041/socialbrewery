@@ -221,3 +221,15 @@ export function describePoint(x: number, y: number): { name: string; tag: string
   const text = (target.getAttribute('aria-label') || (target as HTMLElement).innerText || (target as HTMLInputElement).value || '').replace(/\s+/g, ' ').trim().slice(0, 90)
   return { name: text, tag: target.tagName.toLowerCase(), role: target.getAttribute('role') || '' }
 }
+
+/** Reads a public Reddit JSON listing from inside a reddit.com tab, so it goes out as the person's own browsing (same origin, their session). GET only. */
+export async function fetchRedditJson(path: string): Promise<{ status: number; body: string }> {
+  if (!/^\/[^\s]*$/.test(path) || location.hostname.replace(/^www\.|^old\.|^new\./, '') !== 'reddit.com') return { status: 0, body: 'Not a reddit.com tab.' }
+  try {
+    const res = await fetch(path, { credentials: 'include', headers: { Accept: 'application/json' } })
+    const body = await res.text()
+    return { status: res.status, body: body.slice(0, 3_000_000) }
+  } catch (err) {
+    return { status: 0, body: String((err as Error)?.message || err) }
+  }
+}

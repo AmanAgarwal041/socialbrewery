@@ -25,6 +25,8 @@ import { listHashnodePosts, updateHashnode } from './hashnode.js';
 import { listSlackChannels } from './slack.js';
 import { deleteReddit, listRedditSubreddits } from './reddit.js';
 import { cfg, publicOrigin } from './context.js';
+import { REDDIT_RESEARCH_TOOLS, REDDIT_RESEARCH_TOOL_NAMES, runRedditResearchTool } from './reddit-research.js';
+import { REDDIT_SKILLS, redditSkill } from './reddit-skills.js';
 import {
   addStudioAsset,
   createVideoProject,
@@ -543,8 +545,8 @@ export const STUDIO_TOOLS = [
   },
 ];
 
-// The connector lists the Video Studio tools after the posting tools.
-MCP_TOOLS.push(...STUDIO_TOOLS);
+// The connector lists the Reddit research and Video Studio tools after the posting tools.
+MCP_TOOLS.push(...REDDIT_RESEARCH_TOOLS, ...STUDIO_TOOLS);
 
 export const MCP_PROMPTS = [
   { name: 'make_launch_video', description: 'Make a launch video from a PR, changelog, or docs page with the Video Studio.', arguments: [{ name: 'source', description: 'PR, docs, or changelog URL', required: true }, { name: 'brand', description: 'Brand kit id' }, { name: 'style', description: 'Motion style id' }], playbook: 'launch-video' },
@@ -552,10 +554,41 @@ export const MCP_PROMPTS = [
   { name: 'make_explainer_promo', description: 'Make an explainer promo that lands on the product.', arguments: [{ name: 'topic', description: 'Concept to explain', required: true }, { name: 'brand', description: 'Brand kit id' }, { name: 'style', description: 'Motion style id' }], playbook: 'explainer-promo' },
 ];
 
+// Research prompts load a skill from src/reddit-skills.js instead of a Video Studio playbook.
+MCP_PROMPTS.push(
+  {
+    name: 'find_reddit_leads',
+    description: 'Find people on Reddit who need what you make, qualify them, and save them as leads.',
+    arguments: [
+      { name: 'offer', description: 'What the product does, in plain words', required: true },
+      { name: 'audience', description: 'Who it is for' },
+      { name: 'subreddits', description: 'Subreddits to search, comma separated (optional)' },
+      { name: 'competitors', description: 'Alternatives people use today (optional)' },
+    ],
+    skill: 'reddit-lead-research',
+  },
+  {
+    name: 'research_reddit_user',
+    description: 'Look at one Reddit user\'s public activity and judge them as a lead.',
+    arguments: [{ name: 'username', description: 'Reddit username', required: true }, { name: 'offer', description: 'What the product does' }],
+    skill: 'reddit-user-research',
+  },
+);
+
+function skillPrompt(prompt, args) {
+  const brief = prompt.arguments.map((a) => (args[a.name] ? `${a.description}: ${args[a.name]}` : '')).filter(Boolean).join('\n');
+  const tools = 'Tools: find_subreddits, search_reddit, get_reddit_thread, research_reddit_user, save_reddit_leads, list_reddit_leads, update_reddit_lead, reddit_subreddit_rules, comment_reddit (only after the person approves the exact text).';
+  return {
+    description: prompt.description,
+    messages: [{ role: 'user', content: { type: 'text', text: `${prompt.description}\n${brief}\n\n${tools}\n\nFollow this skill and its limits.\n\n${redditSkill(prompt.skill).text}` } }],
+  };
+}
+
 async function getPrompt(params) {
   const prompt = MCP_PROMPTS.find((p) => p.name === params?.name);
   if (!prompt) throw new Error(`Unknown prompt: ${params?.name || 'missing'}`);
   const args = params.arguments || {};
+  if (prompt.skill) return skillPrompt(prompt, args);
   const pack = await getVideoPlaybook({ playbook: prompt.playbook, style: args.style || undefined, brand: args.brand || undefined });
   const subject = args.source || args.topic || '';
   return {
@@ -615,11 +648,16 @@ export async function handleRpc(message, { client = 'grok' } = {}) {
   if (method === 'ping') return rpcResult(id, {});
   if (method === 'tools/list') return rpcResult(id, { tools: MCP_TOOLS });
   if (method === 'resources/list') {
-    return rpcResult(id, { resources: listStudioDocs().map(({ uri, path, title, summary, mimeType }) => ({ uri, name: path, title: title || path, description: summary || undefined, mimeType })) });
+    const skills = Object.entries(REDDIT_SKILLS).map(([name, skill]) => ({ uri: `skills://${name}`, name, title: skill.title, description: skill.summary, mimeType: 'text/markdown' }));
+    return rpcResult(id, { resources: [...skills, ...listStudioDocs().map(({ uri, path, title, summary, mimeType }) => ({ uri, name: path, title: title || path, description: summary || undefined, mimeType }))] });
   }
   if (method === 'resources/templates/list') return rpcResult(id, { resourceTemplates: [] });
   if (method === 'resources/read') {
     try {
+      if (String(message.params?.uri || '').startsWith('skills://')) {
+        const skill = redditSkill(message.params.uri);
+        return rpcResult(id, { contents: [{ uri: skill.uri, mimeType: 'text/markdown', text: skill.text }] });
+      }
       const doc = readStudioDoc(message.params?.uri);
       const mimeType = doc.path.endsWith('.json') ? 'application/json' : doc.path.endsWith('.html') ? 'text/html' : 'text/markdown';
       return rpcResult(id, { contents: [{ uri: doc.uri, mimeType, text: doc.text }] });
@@ -737,6 +775,7 @@ async function callTool(params, source) {
   if (name === 'delete_reddit_post') {
     return deleteReddit(args.post);
   }
+  if (REDDIT_RESEARCH_TOOL_NAMES.has(name)) return runRedditResearchTool(name, args, source);
   if (name === 'list_video_styles') return listVideoStyles();
   if (name === 'get_video_playbook') return getVideoPlaybook(args);
   if (name === 'list_studio_docs') return { docs: listStudioDocs() };

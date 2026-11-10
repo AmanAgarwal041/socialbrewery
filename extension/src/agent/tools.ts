@@ -5,6 +5,7 @@
 import type { AgentTab } from './browser'
 import { generateVideo } from './video'
 import { GENERIC_PUBLISH, playbookFor } from './playbooks'
+import { createResearchHandlers, RESEARCH_TOOLS } from './research'
 import { getFile, listFiles, type PostRecord, type Settings } from '../storage'
 
 export type ToolSpec = { name: string; description: string; schema: Record<string, unknown> }
@@ -18,6 +19,8 @@ export type ToolContext = {
   signal: AbortSignal
   approve: (request: ApprovalRequest) => Promise<boolean>
   onPost: (post: PostRecord) => void
+  /** Saved Reddit leads changed (the side panel refreshes its list and syncs). */
+  onLeads: () => void
   progress: (text: string) => void
 }
 
@@ -100,6 +103,8 @@ export const TOOLS: ToolSpec[] = [
     description: 'After something was actually published, record it with its real link (read it from the page). Never invent a link.',
     schema: obj({ network: { type: 'string' }, url: { type: 'string' }, title: { type: 'string', description: 'A short description of what was posted.' } }, ['network', 'url', 'title']),
   },
+  // Reddit research only reads; replies still go through the page and the approval gate below.
+  ...RESEARCH_TOOLS,
 ]
 
 const SEARCHY = /search|find|jump|switch|filter|go to|quick/i
@@ -146,6 +151,8 @@ export function createExecutor(ctx: ToolContext) {
   let lastHost: string | null = null
 
   const handlers: Record<string, (input: Record<string, unknown>) => Promise<ToolResult>> = {
+    ...createResearchHandlers(ctx.tab, ctx.signal, ctx.onLeads),
+
     async read_page() {
       const snapshot = await ctx.tab.snapshot()
       const text = describe(snapshot, lastHost)

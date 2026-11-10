@@ -7,9 +7,11 @@ import { startConversation, type Conversation } from './providers'
 import { createExecutor, TOOLS, type ApprovalRequest } from './tools'
 import type { PostRecord, Settings } from '../storage'
 
-const MAX_STEPS = 60
+const MAX_STEPS = 80
+// Reads that would only clutter the run's step list.
+const QUIET = new Set(['read_page', 'screenshot', 'list_files', 'list_reddit_leads'])
 
-export const SYSTEM = `You are the Socialbrewery posting agent, working inside the user's own Chrome through a side panel. You help one person write and publish posts on YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode, using the accounts they are already signed in to in this browser. There are no API connections: you do everything by reading pages and clicking and typing in the tab, like a person would.
+export const SYSTEM = `You are the Socialbrewery posting agent, working inside the user's own Chrome through a side panel. You help one person write and publish posts on YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode, and research Reddit for people who need what they make, using the accounts they are already signed in to in this browser. There are no API connections: you do everything by reading pages and clicking and typing in the tab, like a person would.
 
 How to work:
 - Start with read_page to see where you are. Use navigate to go to a site's posting page (starting points are below) and read_page after every navigation, click that opens something, or upload.
@@ -19,6 +21,12 @@ How to work:
 - If the user is not signed in to a site, stop and ask them to sign in in that tab; never type passwords or codes.
 - Every click or key that publishes or sends asks the user to approve it in the side panel. That is expected: fill everything in first, then click the publish button once. If they decline, ask what to change. Never try to get around the approval.
 - After something is published, find its real link on the page and call record_post. Never invent links, view counts, or results.
+
+Reddit research (finding leads and potential users):
+- When asked to find leads, prospects, potential users, or people who need something, first call get_research_skill with reddit-lead-research and follow it. Before judging one person, read reddit-user-research.
+- find_subreddits, search_reddit, get_reddit_thread, and research_reddit_user read public Reddit in this tab (they open reddit.com if needed). If one fails, you can still navigate to Reddit's search page and use read_page.
+- Save qualified leads with save_reddit_leads; they appear under Leads in the side panel. Use list_reddit_leads and update_reddit_lead to follow up.
+- Never send direct messages or chat requests, follow, vote, or contact people in bulk. Engaging means one genuinely helpful public reply the user approves, with affiliation disclosed, where the subreddit's rules allow it. After such a reply, set the lead to engaged.
 
 Writing:
 - Post only to the network the user named. If they did not name one, ask.
@@ -40,6 +48,7 @@ export type AgentEvents = {
   onProgress: (text: string) => void
   approve: (request: ApprovalRequest) => Promise<boolean>
   onPost: (post: PostRecord) => void
+  onLeads: () => void
 }
 
 function summarize(name: string, input: Record<string, unknown>) {
@@ -62,6 +71,20 @@ function summarize(name: string, input: Record<string, unknown>) {
       return `Posted to ${input.network}`
     case 'read_page':
       return 'Read the page'
+    case 'get_research_skill':
+      return `Read the ${String(input.name || '').replace(/-/g, ' ')} skill`
+    case 'find_subreddits':
+      return `Find subreddits about "${String(input.query || '').slice(0, 50)}"`
+    case 'search_reddit':
+      return `Search ${input.subreddit ? `r/${String(input.subreddit).replace(/^\/?r\//i, '')}` : 'Reddit'} for "${String(input.query || '').slice(0, 50)}"`
+    case 'get_reddit_thread':
+      return 'Read a Reddit thread'
+    case 'research_reddit_user':
+      return `Look at u/${String(input.username || '').replace(/^\/?u\//i, '')}`
+    case 'save_reddit_leads':
+      return `Save ${Array.isArray(input.leads) ? input.leads.length : 0} leads`
+    case 'update_reddit_lead':
+      return 'Update a lead'
     default:
       return name.replace(/_/g, ' ')
   }
@@ -102,6 +125,7 @@ export class AgentSession {
       signal: controller.signal,
       approve: events.approve,
       onPost: events.onPost,
+      onLeads: events.onLeads,
       progress: events.onProgress,
     })
     this.conversation.addUser(text)
@@ -125,7 +149,7 @@ export class AgentSession {
           }
           events.onProgress(summarize(call.name, call.input))
           const result = await execute(call.name, call.input).catch(() => ({ text: 'Stopped by the user.', isError: true }))
-          if (call.name !== 'read_page' && call.name !== 'screenshot' && call.name !== 'list_files') events.onAction(summarize(call.name, call.input) + (result.isError ? `: ${result.text}` : ''), result.isError)
+          if (!QUIET.has(call.name)) events.onAction(summarize(call.name, call.input) + (result.isError ? `: ${result.text}` : ''), result.isError)
           results.push({ call, result })
         }
         this.conversation.addResults(results)

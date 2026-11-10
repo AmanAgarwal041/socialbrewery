@@ -196,6 +196,18 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     const strangerExt = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: 'chrome-extension://someoneelse' });
     assert.equal((await fromExtension({ runs: [run] }, strangerExt, 'chrome-extension://someoneelse')).status, 403);
 
+    // Reddit leads: the extension saves its leads to the organisation, members update them, and
+    // only admins delete them.
+    const extLeads = await fetch(`${base}/api/reddit/leads`, { method: 'POST', headers: { Origin: ext, 'Content-Type': 'application/json', Authorization: `Bearer ${extToken}` }, body: JSON.stringify({ source: 'extension', leads: [{ username: 'ada_dev', postUrl: 'https://www.reddit.com/r/devops/comments/abc123/x/', fit: 'high', reason: 'Asked for a tool.', updatedAt: 50 }] }) }).then((res) => res.json());
+    assert.equal(extLeads.added, 1);
+    const redditLead = (await fetch(`${base}/api/reddit/leads`, as(memberToken)).then((res) => res.json())).leads[0];
+    assert.equal(redditLead.source, 'extension');
+    const patched = await fetch(`${base}/api/reddit/leads/${redditLead.id}`, as(memberToken, { method: 'PATCH', body: JSON.stringify({ status: 'engaged' }) })).then((res) => res.json());
+    assert.equal(patched.lead.status, 'engaged');
+    assert.equal((await fetch(`${base}/api/reddit/leads/${redditLead.id}`, as(memberToken, { method: 'DELETE' }))).status, 403);
+    assert.equal((await fetch(`${base}/api/reddit/leads/${redditLead.id}`, as(adminToken, { method: 'DELETE' }))).status, 200);
+    assert.equal((await fetch(`${base}/api/reddit/search?q=alternative+to+buffer`, as(memberToken)).then((res) => res.json())).manual, true);
+
     // Email: members add leads and draft; importing and sending are for admins. Every email's
     // unsubscribe link works without signing in, including mail apps' one-click POST.
     const memberLead = await fetch(`${base}/api/email/leads`, as(memberToken, { method: 'POST', body: JSON.stringify({ email: 'Lead@Example.com', firstName: 'Lee' }) }));

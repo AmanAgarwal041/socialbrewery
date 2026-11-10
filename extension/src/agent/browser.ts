@@ -2,7 +2,7 @@
 // and screenshots through the Chrome DevTools Protocol. Chrome shows a "started debugging this
 // browser" bar while attached, which is the user's signal that the agent is at work.
 
-import { attachFile, describePoint, focusedElement, locateRef, receiveFileChunk, scrollPage, snapshotPage, type ElementBox, type PageSnapshot } from './page'
+import { attachFile, describePoint, fetchRedditJson, focusedElement, locateRef, receiveFileChunk, scrollPage, snapshotPage, type ElementBox, type PageSnapshot } from './page'
 
 const PROTOCOL = '1.3'
 const CHUNK = 768 * 1024
@@ -111,6 +111,19 @@ export class AgentTab {
 
   async tab() {
     return chrome.tabs.get(this.tabId)
+  }
+
+  /** GET a Reddit JSON path (like /search.json?q=…) from inside the tab, opening reddit.com first if the tab is elsewhere. */
+  async redditJson(path: string): Promise<{ status: number; body: string }> {
+    const tab = await this.tab()
+    let host = ''
+    try {
+      host = new URL(tab.url || '').hostname
+    } catch {
+      // not a web page yet
+    }
+    if (!/(^|\.)reddit\.com$/.test(host)) await this.navigate('https://www.reddit.com/')
+    return this.run(fetchRedditJson, [path])
   }
 
   async snapshot(): Promise<PageSnapshot> {
