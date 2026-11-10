@@ -385,6 +385,9 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         runRef.current = fresh
         setRun(fresh)
         setReadOnly(false)
+      } else {
+        // Keys or models changed in Settings mid-chat apply from this message on.
+        session.current.useSettings(settings)
       }
     } catch (err) {
       setError((err as Error).message)

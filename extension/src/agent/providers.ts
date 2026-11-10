@@ -13,6 +13,8 @@ export interface Conversation {
   addUser(text: string): void
   next(signal: AbortSignal): Promise<Turn>
   addResults(results: { call: ToolCall; result: ToolResult }[]): void
+  /** Picks up keys and models changed in Settings since the chat started. */
+  useSettings(settings: Settings): void
 }
 
 // ---------- Claude ----------
@@ -42,6 +44,11 @@ class ClaudeConversation implements Conversation {
     this.tools = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema as Anthropic.Beta.BetaTool.InputSchema }))
   }
 
+  useSettings(settings: Settings) {
+    if (settings.anthropicKey !== this.settings.anthropicKey) this.client = new Anthropic({ apiKey: settings.anthropicKey, dangerouslyAllowBrowser: true, maxRetries: 3 })
+    this.settings = settings
+  }
+
   addUser(text: string) {
     this.messages.push({ role: 'user', content: text })
   }
@@ -50,7 +57,8 @@ class ClaudeConversation implements Conversation {
     const model = this.settings.claudeModel
     const haiku = model.startsWith('claude-haiku')
     const fallback = FALLBACK_MODELS.has(model)
-    const response = await this.client.beta.messages.create(
+    const response = await this.client.beta.messages
+      .create(
       {
         model,
         max_tokens: 16000,
@@ -63,7 +71,12 @@ class ClaudeConversation implements Conversation {
         ...(fallback ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
       },
       { signal },
-    )
+      )
+      .catch((err: unknown) => {
+        // A bad key reads as a 401 with a terse message; say what to fix.
+        if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) throw new Error('Anthropic did not accept your API key. Check it in Settings (it starts with sk-ant-), then send again.')
+        throw err
+      })
     // Append the whole content (thinking blocks included), never just the text.
     this.messages.push({ role: 'assistant', content: response.content })
     const text = response.content
@@ -117,6 +130,10 @@ class GrokConversation implements Conversation {
     this.settings = settings
     this.messages = [{ role: 'system', content: system }]
     this.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.schema } }))
+  }
+
+  useSettings(settings: Settings) {
+    this.settings = settings
   }
 
   addUser(text: string) {

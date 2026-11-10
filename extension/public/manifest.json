@@ -3,7 +3,7 @@
   "name": "Socialbrewery",
   "short_name": "Socialbrewery",
   "description": "Grok or Claude writes your post and fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode, and finds Reddit leads, in your own tabs. Nothing goes live until you approve it.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4b/qVfjxfnk3oZh4D3Fmrk5dIc3wzpvkdjMDkSpc8N07xzVkV3YIgRKGFm7t/lK4f84fwSRnDPEgOK9ISvwhU0AAJs0qqwXlHvEZ1OiS5xgg+e1uwtAwx91+WeJVfQMc0Zw9ul49OCN0LDnceaai1atKLAzKlhy08o/k0RBqDZUUqOhjxyw7Pk8Mhe5zXh/2MznomYE8uXA0/6EnRTBaI5P09yy93/LeRSWUHQ6vMLt50zrLMUYnR4WoK8ld6YIcYIAEIfvx4wZuz/EcXCQwMSNfD7IxDodPUWWQpMqURx60z3y+8MR9mjOzQ65MyXXXUzi+7bTBnq9j9KstA29NNQIDAQAB",
   "minimum_chrome_version": "120",
   "action": { "default_title": "Open Socialbrewery" },

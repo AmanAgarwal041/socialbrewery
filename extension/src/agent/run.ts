@@ -102,6 +102,19 @@ export class AgentSession {
     this.conversation = startConversation(settings, SYSTEM, TOOLS)
   }
 
+  get provider() {
+    return this.settings.provider
+  }
+
+  /** Uses the latest keys and models from Settings for the next message. */
+  useSettings(settings: Settings) {
+    if (settings.provider !== this.settings.provider) throw new Error('Start a new chat to switch models.')
+    if (settings.provider === 'claude' && !settings.anthropicKey) throw new Error('Add your Anthropic API key in Settings to use Claude.')
+    if (settings.provider === 'grok' && !settings.xaiKey) throw new Error('Add your xAI API key in Settings to use Grok.')
+    this.settings = settings
+    this.conversation.useSettings(settings)
+  }
+
   get tabId() {
     return this.tab.tabId
   }
