@@ -5,7 +5,7 @@ import { AgentTab } from './browser'
 import { PLAYBOOKS } from './playbooks'
 import { startConversation, type Conversation } from './providers'
 import { createExecutor, TOOLS, type ApprovalRequest } from './tools'
-import type { PostRecord, Settings } from '../storage'
+import type { PostRecord, Run, Settings } from '../storage'
 
 const MAX_STEPS = 80
 // Reads that would only clutter the run's step list.
@@ -90,16 +90,39 @@ function summarize(name: string, input: Record<string, unknown>) {
   }
 }
 
+// Resuming keeps the most recent part of a long chat.
+const TRANSCRIPT_LIMIT = 24_000
+
+/**
+ * The earlier part of a saved chat, as text. Only messages and action summaries are saved (not the
+ * provider's tool calls), so a resumed chat starts a fresh conversation with this as context.
+ */
+export function transcript(run: Run) {
+  const lines = run.steps.map((step) => {
+    if (step.kind === 'user') return `User: ${step.text}`
+    if (step.kind === 'assistant') return `You: ${step.text}`
+    if (step.kind === 'approval') return `(${step.approved ? 'User approved' : 'User declined'}: ${step.text})`
+    return `(${step.error ? 'Failed' : 'Did'}: ${step.text})`
+  })
+  for (const post of run.posts) lines.push(`(Posted on ${post.network}: ${post.title} ${post.url})`)
+  const text = lines.join('\n\n')
+  return text.length > TRANSCRIPT_LIMIT ? `[Earlier messages trimmed]\n…${text.slice(-TRANSCRIPT_LIMIT)}` : text
+}
+
 export class AgentSession {
   private conversation: Conversation
   private tab: AgentTab
   private settings: Settings
   private controller: AbortController | null = null
 
-  constructor(settings: Settings, tabId: number) {
+  /** Context from a saved chat, sent once with the first new message. */
+  private resumeFrom: string
+
+  constructor(settings: Settings, tabId: number, resume?: Run) {
     this.settings = settings
     this.tab = new AgentTab(tabId)
     this.conversation = startConversation(settings, SYSTEM, TOOLS)
+    this.resumeFrom = resume?.steps.length ? transcript(resume) : ''
   }
 
   get provider() {
@@ -141,7 +164,14 @@ export class AgentSession {
       onLeads: events.onLeads,
       progress: events.onProgress,
     })
-    this.conversation.addUser(text)
+    if (this.resumeFrom) {
+      this.conversation.addUser(
+        `This continues an earlier chat from the side panel. Results of your earlier tool calls are not available, so read the page again before acting, and never repeat a publish that already happened. The chat so far:\n<earlier_chat>\n${this.resumeFrom}\n</earlier_chat>\n\nThe user's new message:\n${text}`,
+      )
+      this.resumeFrom = ''
+    } else {
+      this.conversation.addUser(text)
+    }
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
         events.onProgress('Thinking…')

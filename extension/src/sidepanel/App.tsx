@@ -4,6 +4,7 @@ import { AgentSession } from '@/agent/run'
 import { CLAUDE_MODELS } from '@/agent/providers'
 import type { ApprovalRequest } from '@/agent/tools'
 import { syncLeads, syncRuns } from '@/sync'
+import { Markdown } from './markdown'
 import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
 import { useAccount } from './account'
 
@@ -72,7 +73,7 @@ function ApprovalCard({ pending }: { pending: Pending }) {
 
 function StepView({ step }: { step: Step }) {
   if (step.kind === 'user') return <div className="ml-8 rounded-xl bg-p1-soft px-3 py-2 whitespace-pre-wrap">{step.text}</div>
-  if (step.kind === 'assistant') return <div className="mr-4 rounded-xl border border-border bg-card px-3 py-2 whitespace-pre-wrap">{step.text}</div>
+  if (step.kind === 'assistant') return <Markdown text={step.text} className="mr-4 rounded-xl border border-border bg-card px-3 py-2" />
   if (step.kind === 'approval')
     return (
       <p className={cn('text-xs', step.approved ? 'text-p4-ink' : 'text-danger')}>
@@ -318,7 +319,8 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
   const account = useAccount()
   const [view, setView] = useState<View>('chat')
   const [run, setRun] = useState<Run | null>(null)
-  const [readOnly, setReadOnly] = useState(false)
+  // An earlier chat opened from History: the next message continues it.
+  const [resumed, setResumed] = useState(false)
   const [input, setInput] = useState('')
   const [progress, setProgress] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
@@ -367,7 +369,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
     session.current = null
     runRef.current = null
     setRun(null)
-    setReadOnly(false)
+    setResumed(false)
     setError('')
     setView('chat')
   }
@@ -380,11 +382,16 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
       if (!session.current) {
         const tab = await workTab()
         if (!tab?.id) throw new Error('Open a tab for the agent to work in.')
-        session.current = new AgentSession(settings, tab.id)
-        const fresh: Run = { id: crypto.randomUUID(), title: text.slice(0, 80), provider: settings.provider, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), steps: [], posts: [] }
-        runRef.current = fresh
-        setRun(fresh)
-        setReadOnly(false)
+        if (runRef.current) {
+          // Continuing a chat from History: same run, a new conversation that starts from its transcript.
+          session.current = new AgentSession(settings, tab.id, runRef.current)
+          setResumed(false)
+        } else {
+          session.current = new AgentSession(settings, tab.id)
+          const fresh: Run = { id: crypto.randomUUID(), title: text.slice(0, 80), provider: settings.provider, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), steps: [], posts: [] }
+          runRef.current = fresh
+          setRun(fresh)
+        }
       } else {
         // Keys or models changed in Settings mid-chat apply from this message on.
         session.current.useSettings(settings)
@@ -504,10 +511,19 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         {view === 'history' && (
           <HistoryView
             onOpen={(r) => {
+              if (running) {
+                setError('Stop the current run before opening another chat.')
+                setView('chat')
+                return
+              }
               session.current = null
-              runRef.current = r
-              setRun(r)
-              setReadOnly(true)
+              // A run left "running" (the panel was closed mid-run) has stopped.
+              const opened: Run = r.status === 'running' ? { ...r, status: 'stopped' } : r
+              runRef.current = opened
+              setRun(opened)
+              setResumed(true)
+              setError('')
+              setInput('')
               setView('chat')
             }}
             onChanged={() => void sync()}
@@ -556,43 +572,45 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
 
       {view === 'chat' && (
         <footer className="border-t border-border p-2">
-          {readOnly ? (
-            <Button variant="outline" className="w-full" onClick={newChat}>
-              <Plus /> Start a new chat
-            </Button>
-          ) : (
-            <div className="rounded-xl border border-border bg-card focus-within:ring-2 focus-within:ring-p1">
-              <textarea
-                rows={3}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    void send()
-                  }
-                }}
-                placeholder={keyMissing ? 'Add your API key in Settings first' : 'What should it post, or who should it find?'}
-                className="block w-full resize-none bg-transparent px-3 py-2 outline-none"
-              />
-              <div className="flex items-center gap-1 px-2 pb-2">
-                <input ref={fileInput} type="file" accept="video/*,image/*" multiple hidden onChange={(e) => void attach(e.target.files).then(() => (e.target.value = ''))} />
-                <Button variant="ghost" className="px-2" aria-label="Attach a video or image" onClick={() => fileInput.current?.click()}>
-                  <Paperclip />
-                </Button>
-                <span className="flex-1" />
-                {running ? (
-                  <Button variant="danger" onClick={stop}>
-                    <CircleStop /> Stop
-                  </Button>
-                ) : (
-                  <Button onClick={() => void send()} disabled={!input.trim() || keyMissing} aria-label="Send">
-                    <ArrowUp />
-                  </Button>
-                )}
-              </div>
-            </div>
+          {resumed && (
+            <p className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+              <History className="size-3" /> Continuing an earlier chat. Your next message picks up where it left off.
+              <button className="ml-auto underline" onClick={newChat}>
+                New chat
+              </button>
+            </p>
           )}
+          <div className="rounded-xl border border-border bg-card focus-within:ring-2 focus-within:ring-p1">
+            <textarea
+              rows={3}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void send()
+                }
+              }}
+              placeholder={keyMissing ? 'Add your API key in Settings first' : resumed ? 'Continue this chat…' : 'What should it post, or who should it find?'}
+              className="block w-full resize-none bg-transparent px-3 py-2 outline-none"
+            />
+            <div className="flex items-center gap-1 px-2 pb-2">
+              <input ref={fileInput} type="file" accept="video/*,image/*" multiple hidden onChange={(e) => void attach(e.target.files).then(() => (e.target.value = ''))} />
+              <Button variant="ghost" className="px-2" aria-label="Attach a video or image" onClick={() => fileInput.current?.click()}>
+                <Paperclip />
+              </Button>
+              <span className="flex-1" />
+              {running ? (
+                <Button variant="danger" onClick={stop}>
+                  <CircleStop /> Stop
+                </Button>
+              ) : (
+                <Button onClick={() => void send()} disabled={!input.trim() || keyMissing} aria-label="Send">
+                  <ArrowUp />
+                </Button>
+              )}
+            </div>
+          </div>
         </footer>
       )}
     </div>
