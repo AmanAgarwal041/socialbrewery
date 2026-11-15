@@ -20,20 +20,20 @@ export function PageHeader({
   actions?: ReactNode
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="flex items-start gap-4">
+    <div className="mb-5 flex flex-col gap-3 border-b pb-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex min-w-0 items-center gap-3">
         {Icon && (
-          <div className={cn('flex size-12 shrink-0 items-center justify-center rounded-2xl shadow-sm', iconClass)}>
-            <Icon className="size-6" />
+          <div className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg', iconClass || 'border bg-muted text-foreground/80')}>
+            <Icon className="size-4" />
           </div>
         )}
-        <div>
-          {eyebrow && <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">{eyebrow}</p>}
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
-          {description && <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{description}</p>}
+        <div className="min-w-0">
+          {eyebrow && <p className="text-[11px] tracking-wide text-muted-foreground uppercase">{eyebrow}</p>}
+          <h1 className="truncate text-lg leading-tight font-semibold">{title}</h1>
+          {description && <p className="mt-0.5 max-w-3xl text-xs text-muted-foreground md:text-[13px]">{description}</p>}
         </div>
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 md:justify-end">{actions}</div>}
     </div>
   )
 }
@@ -50,9 +50,9 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed bg-card/60 px-6 py-12 text-center">
-      <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-p2-soft text-p2-ink">
-        <Icon className="size-6" />
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-card/60 px-6 py-12 text-center">
+      <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-p2-soft text-p2-ink">
+        <Icon className="size-5" />
       </div>
       <h3 className="font-medium">{title}</h3>
       {children && <p className="mt-1 max-w-sm text-sm text-muted-foreground">{children}</p>}
