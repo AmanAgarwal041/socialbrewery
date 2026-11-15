@@ -30,7 +30,6 @@ function openDashboard(serverUrl: string, path: string) {
 function ClerkAccount({ serverUrl, children }: { serverUrl: string; children: ReactNode }) {
   const { isLoaded, isSignedIn, getToken } = useAuth()
   const { user } = useUser()
-  const { organization } = useOrganization()
   const clerk = useClerk()
   const value = useMemo<Account>(
     () => ({
@@ -38,13 +37,22 @@ function ClerkAccount({ serverUrl, children }: { serverUrl: string; children: Re
       loaded: isLoaded,
       signedIn: !!isSignedIn,
       email: user?.primaryEmailAddress?.emailAddress || '',
-      orgName: organization?.name || '',
+      orgName: '',
       getToken: () => getToken().catch(() => null),
       signIn: () => openDashboard(serverUrl, '/login'),
       signOut: () => clerk.signOut(),
     }),
-    [isLoaded, isSignedIn, user, organization, getToken, clerk, serverUrl],
+    [isLoaded, isSignedIn, user, getToken, clerk, serverUrl],
   )
+  // useOrganization needs a signed-in user (Clerk warns otherwise), so it only runs once signed in.
+  if (isSignedIn) return <WithOrganization account={value}>{children}</WithOrganization>
+  return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>
+}
+
+function WithOrganization({ account, children }: { account: Account; children: ReactNode }) {
+  const { organization } = useOrganization()
+  const orgName = organization?.name || ''
+  const value = useMemo(() => ({ ...account, orgName }), [account, orgName])
   return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>
 }
 
