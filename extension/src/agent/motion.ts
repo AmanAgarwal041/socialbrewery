@@ -2,16 +2,19 @@
 // scenes; src/studio-compose.js turns them into the same HyperFrames + GSAP composition the server
 // renders with `npx hyperframes`. Here a render tab loads it, the DevTools Protocol seeks the GSAP
 // timeline frame by frame and screenshots each frame, and WebCodecs (through Mediabunny) encodes an
-// MP4. No video API, no key, no upload: the file stays in this browser for upload_file.
+// MP4. Every video gets a voiceover by default (src/agent/voice.ts: the user's clone, a paid voice, or a
+// free one run on this computer); scenes stretch to fit their lines. No upload: the file stays in this
+// browser for upload_file.
 
-import { BufferTarget, CanvasSource, getFirstEncodableVideoCodec, Mp4OutputFormat, Output, QUALITY_HIGH } from 'mediabunny'
+import { AudioBufferSource, BufferTarget, CanvasSource, getFirstEncodableAudioCodec, getFirstEncodableVideoCodec, Mp4OutputFormat, Output, QUALITY_HIGH } from 'mediabunny'
 import gsapSource from 'gsap/dist/gsap.min.js?raw'
 import interUrl from '../../../studio/fonts/Inter.ttf?url'
 import monoUrl from '../../../studio/fonts/GeistMono.ttf?url'
 import template from '../../../studio/templates/composition.html?raw'
 import defaultBrand from '../../../studio/brands/default.json'
 import { composeHtml, normalizeBrand, type Brand } from '../../../src/studio-compose.js'
-import { addFile, getFile, type MediaFile } from '../storage'
+import { addFile, getFile, loadSettings, type MediaFile, type Settings } from '../storage'
+import { mixVoiceover, speakLines, type Voice } from './voice'
 
 const PROTOCOL = '1.3'
 
@@ -30,7 +33,8 @@ export function motionGuide(style: string) {
     ...list,
     '',
     'Scene effects: focus, zoom-through, rack, hinge, slats, shutter, pillars (needs real measured bar heights), endcard (last scene: loader, CTA, question), pop, kinetic, split, wipe, counter (needs a real stat.value).',
-    'In this browser: no add_studio_asset or voiceover; scene images are https URLs or file:<id> from list_files. Keep headlines to about 8 words, no em dashes, one highlight word.',
+    'Voiceover is on by default: give every scene a narration line (what the narrator says, a short spoken sentence that adds to the headline instead of reading it out; about 2.5 words per second). Scenes stretch to fit their line. narration "" keeps a scene silent; voiceover false makes a silent video.',
+    'In this browser: no add_studio_asset; scene images are https URLs or file:<id> from list_files. Keep headlines to about 8 words, no em dashes, one highlight word.',
     '',
     ...Object.values(GUIDES),
   ].join('\n')
@@ -45,9 +49,43 @@ export type MotionInput = {
   cta?: { label?: string; url?: string }
   question?: string
   fps?: number
+  /** Default true: narrate each scene's narration (or its on-screen text when none is given). */
+  voiceover?: boolean
 }
 
-export type MotionResult = { file: MediaFile; seconds: number; width: number; height: number; codec: string; sheet: string }
+export type MotionResult = { file: MediaFile; seconds: number; width: number; height: number; codec: string; sheet: string; voice?: Voice; audioCodec?: string; note?: string }
+
+const LEAD = 0.25
+const TAIL = 0.45
+
+/** What the narrator says over a scene: its narration line, or else its on-screen words. */
+function narrationFor(scene: Record<string, unknown>, input: MotionInput) {
+  if (typeof scene.narration === 'string') return scene.narration
+  const say = (v: unknown) => (typeof v === 'string' ? v.trim().replace(/[.!?,;:]*$/, '') : '')
+  const parts = [say(scene.headline), say(scene.sub)]
+  if (scene.effect === 'endcard') parts.push(say(input.cta?.label), say(input.question))
+  return parts.filter(Boolean).join('. ').replace(/\s*[\u2013\u2014]\s*/g, ', ')
+}
+
+/** Records the lines, stretches scenes to fit them, and mixes one voiceover track. */
+async function voiceover(input: MotionInput, settings: Settings, brandSpeed: unknown, signal: AbortSignal, onProgress: (text: string) => void) {
+  const lines = input.scenes.map((scene) => narrationFor(scene, input))
+  if (!lines.some((l) => l.trim())) return null
+  const speed = Number(brandSpeed) > 0 ? Number(brandSpeed) : settings.voiceSpeed || 1
+  const { clips, voice, note } = await speakLines(lines, settings, speed, signal, onProgress)
+  let at = 0
+  const placed: { buffer: AudioBuffer; at: number }[] = []
+  const scenes = input.scenes.map((scene, i) => {
+    const clip = clips[i]
+    const given = Number(scene.duration) || 4
+    const duration = clip ? Math.max(given, Math.ceil((clip.duration + LEAD + TAIL) * 10) / 10) : given
+    if (duration > 30) throw new Error(`Scene ${i + 1}'s narration runs ${clip!.duration.toFixed(1)} s; keep each line under about 25 s (split it across scenes).`)
+    if (clip) placed.push({ buffer: clip, at: at + LEAD })
+    at += duration
+    return { ...scene, duration }
+  })
+  return { scenes, placed, voice, note }
+}
 
 type Target = chrome.debugger.Debuggee
 const cdp = <T = unknown>(target: Target, method: string, params?: Record<string, unknown>) => chrome.debugger.sendCommand(target, method, params) as unknown as Promise<T>
@@ -81,8 +119,9 @@ async function inlineImages(scenes: Record<string, unknown>[]) {
 
 /** The composition as one self-contained page: GSAP and fonts inlined, so the render tab needs no files. */
 export async function buildComposition(input: MotionInput) {
+  if (!Array.isArray(input.scenes) || !input.scenes.length) throw new Error('Give at least one scene.')
   const brand = normalizeBrand((input.brand || {}) as Record<string, unknown>, normalizeBrand({}, defaultBrand as Brand))
-  const out = composeHtml(template, { format: input.format || '9x16', brand, scenes: await inlineImages(input.scenes || []), cta: input.cta, question: input.question })
+  const out = composeHtml(template, { format: input.format || '9x16', brand, scenes: await inlineImages(input.scenes), cta: input.cta, question: input.question })
   if (out.duration > MAX_SECONDS) throw new Error(`That is ${out.duration.toFixed(1)} s; render at most ${MAX_SECONDS} s in the browser.`)
   const [inter, mono] = await Promise.all([fontDataUrl(interUrl), fontDataUrl(monoUrl)])
   const html = out.html
@@ -132,14 +171,21 @@ async function contactSheet(frames: ImageBitmap[], width: number, height: number
   return (await dataUrl(blob)).split(',')[1]
 }
 
-export async function renderMotionVideo(input: MotionInput, { signal, onProgress }: { signal: AbortSignal; onProgress: (text: string) => void }): Promise<MotionResult> {
-  const composition = await buildComposition(input)
+export async function renderMotionVideo(input: MotionInput, { signal, onProgress, settings }: { signal: AbortSignal; onProgress: (text: string) => void; settings: Settings }): Promise<MotionResult> {
+  // Checks the scenes before spending time on the voice.
+  await buildComposition(input)
+  const voiced = input.voiceover === false ? null : await voiceover(input, settings, (input.brand?.voice as { speed?: unknown } | undefined)?.speed, signal, onProgress)
+  const composition = voiced ? await buildComposition({ ...input, scenes: voiced.scenes }) : await buildComposition(input)
   const { width, height, duration } = composition
   const fps = input.fps === 24 || input.fps === 60 ? input.fps : 30
   const frames = Math.max(1, Math.round(duration * fps))
 
   const codec = await getFirstEncodableVideoCodec(['avc', 'vp9'], { width, height })
   if (!codec) throw new Error('This browser cannot encode H.264 or VP9 video (WebCodecs). Update Chrome and try again.')
+  // AAC plays everywhere; Chrome builds without an AAC encoder fall back to Opus.
+  const audioCodec = voiced ? await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: 48000 }) : null
+  if (voiced && !audioCodec) throw new Error('This browser cannot encode AAC or Opus audio (WebCodecs). Update Chrome, or pass voiceover false.')
+  const mixed = voiced ? await mixVoiceover(voiced.placed, duration) : null
 
   const [previous] = await chrome.tabs.query({ active: true, currentWindow: true })
   // An active tab keeps painting; background tabs are throttled and would stall the screenshots.
@@ -150,6 +196,8 @@ export async function renderMotionVideo(input: MotionInput, { signal, onProgress
   const ctx = canvas.getContext('2d')!
   const source = new CanvasSource(canvas, { codec, bitrate: QUALITY_HIGH })
   output.addVideoTrack(source, { frameRate: fps })
+  const audioSource = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: QUALITY_HIGH }) : null
+  if (audioSource) output.addAudioTrack(audioSource)
   const sheetFrames = new Map(SHEET_AT.map((at) => [Math.min(frames - 1, Math.floor(at * frames)), null as ImageBitmap | null]))
   let started = false
 
@@ -177,6 +225,7 @@ export async function renderMotionVideo(input: MotionInput, { signal, onProgress
       await source.add(t, 1 / fps, i % (fps * 2) === 0 ? { keyFrame: true } : undefined)
       if (i % fps === 0) onProgress(`Rendering ${Math.floor(t)} of ${Math.ceil(duration)} s…`)
     }
+    if (audioSource && mixed) await audioSource.add(mixed)
     onProgress('Finishing the MP4…')
     await output.finalize()
   } catch (err) {
@@ -193,7 +242,7 @@ export async function renderMotionVideo(input: MotionInput, { signal, onProgress
   const sheet = await contactSheet([...sheetFrames.values()].filter((f): f is ImageBitmap => !!f), width, height)
   sheetFrames.forEach((f) => f?.close())
   const file = await addFile(new Blob([buffer], { type: 'video/mp4' }), `motion-${Date.now()}.mp4`, 'render')
-  return { file, seconds: duration, width, height, codec, sheet }
+  return { file, seconds: duration, width, height, codec, sheet, ...(voiced ? { voice: voiced.voice, audioCodec: audioCodec!, note: voiced.note } : {}) }
 }
 
 // Development builds only (vite build --mode development): lets a local test drive a render and read
@@ -201,7 +250,7 @@ export async function renderMotionVideo(input: MotionInput, { signal, onProgress
 if (import.meta.env.MODE === 'development') {
   Object.assign(globalThis, {
     __sbRenderMotion: async (input: MotionInput) => {
-      const result = await renderMotionVideo(input, { signal: new AbortController().signal, onProgress: (text) => console.info('[motion]', text) })
+      const result = await renderMotionVideo(input, { signal: new AbortController().signal, onProgress: (text) => console.info('[motion]', text), settings: await loadSettings() })
       const file = await getFile(result.file.id)
       return { ...result, video: await dataUrl(file!.blob) }
     },
