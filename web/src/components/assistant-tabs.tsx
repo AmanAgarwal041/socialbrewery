@@ -23,7 +23,7 @@ export function AssistantTabs({
     <div role="tablist" aria-label="Assistant" className={cn('inline-flex items-center gap-0.5 rounded-full p-0.5', tone === 'onBrand' ? 'bg-white/50' : 'bg-muted', className)}>
       {ASSISTANTS.map((a) => {
         const selected = a.id === value
-        const ready = health?.agents ? health.agents[a.id] : undefined
+        const ready = health?.agents ? Boolean(health.agents[a.id]) : undefined
         return (
           <button
             key={a.id}
@@ -39,7 +39,7 @@ export function AssistantTabs({
               tone === 'onBrand' && !selected && 'text-ink/70 hover:text-ink',
             )}
           >
-            <span aria-hidden className={cn('size-1.5 rounded-full', ready === false ? 'bg-muted-foreground/40' : a.id === 'claude' ? 'bg-[#d97757]' : 'bg-foreground/80')} />
+            <span aria-hidden className={cn('size-1.5 rounded-full', ready === false ? 'bg-muted-foreground/40' : a.id === 'claude' ? 'bg-[#d97757]' : a.id === 'openai' ? 'bg-p3' : 'bg-foreground/80')} />
             {a.label}
           </button>
         )

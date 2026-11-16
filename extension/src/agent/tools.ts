@@ -1,4 +1,4 @@
-// The agent's tools, shared by Claude and Grok. Anything that could make content public (a publish
+// The agent's tools, shared by Claude, Grok, and OpenAI. Anything that could make content public (a publish
 // button, Enter in a composer, a Mod+Enter shortcut) pauses for the user's approval here, in code,
 // whatever the model says: page text can contain instructions, and models make mistakes.
 
@@ -95,7 +95,7 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     name: 'generate_video',
-    description: 'Generate a new vertical (9:16) clip with Grok Imagine from a prompt, 1 to 15 seconds. Needs the user\'s xAI key. Returns a file id for upload_file. Takes a minute or more.',
+    description: 'Generate a new vertical (9:16) clip with Grok Imagine from a prompt, 1 to 15 seconds. Works with every assistant (Claude, Grok, or OpenAI) but always needs the user\'s xAI key, since Grok Imagine is the only video model available. Returns a file id for upload_file. Takes a minute or more.',
     schema: obj({ prompt: { type: 'string' }, seconds: { type: 'integer' } }, ['prompt']),
   },
   {

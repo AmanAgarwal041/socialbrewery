@@ -1,11 +1,11 @@
-// One agent session: a conversation with Claude or Grok, working in one tab, step by step, until
+// One agent session: a conversation with Claude, Grok, or OpenAI, working in one tab, step by step, until
 // the model finishes its turn, the user stops it, or it runs out of steps.
 
 import { AgentTab } from './browser'
 import { PLAYBOOKS } from './playbooks'
 import { startConversation, type Conversation } from './providers'
 import { createExecutor, TOOLS, type ApprovalRequest } from './tools'
-import type { PostRecord, Run, Settings } from '../storage'
+import { missingKey, type PostRecord, type Run, type Settings } from '../storage'
 
 const MAX_STEPS = 80
 // Reads that would only clutter the run's step list.
@@ -132,8 +132,8 @@ export class AgentSession {
   /** Uses the latest keys and models from Settings for the next message. */
   useSettings(settings: Settings) {
     if (settings.provider !== this.settings.provider) throw new Error('Start a new chat to switch models.')
-    if (settings.provider === 'claude' && !settings.anthropicKey) throw new Error('Add your Anthropic API key in Settings to use Claude.')
-    if (settings.provider === 'grok' && !settings.xaiKey) throw new Error('Add your xAI API key in Settings to use Grok.')
+    const missing = missingKey(settings)
+    if (missing) throw new Error(missing)
     this.settings = settings
     this.conversation.useSettings(settings)
   }

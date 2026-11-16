@@ -351,7 +351,7 @@ export function LandingPage() {
               </SectionTitle>
               <ul className="mt-6 space-y-4">
                 <Bullet icon={KeyRound} slot="p1" title="No account needed">
-                  Runs on your own Anthropic or xAI key, kept in your browser. Sign in only to save your runs.
+                  Runs on your own Anthropic, xAI, or OpenAI key, kept in your browser. Sign in only to save your runs.
                 </Bullet>
                 <Bullet icon={ShieldCheck} slot="p4" title="You approve every post">
                   It fills everything in, then waits with a screenshot before it clicks Post, Share, Publish, or Send.

@@ -17,8 +17,6 @@ import {
 import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken } from './clerk.js';
 import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
 import { cfg, currentContext, publicOrigin, runWithOrg } from './context.js';
-import { claudeChat } from './claude.js';
-import { grokChat } from './grok.js';
 import {
   DRAFT_SYSTEM,
   addLead,
@@ -54,7 +52,7 @@ import {
   readCampaignBanner,
 } from './email.js';
 import { sign, verifySignature } from './secure.js';
-import { AGENT_PROVIDERS, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
+import { AGENT_PROVIDERS, agentChat, agentKeyMissing, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
 import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
 import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
@@ -258,7 +256,7 @@ async function health() {
     // Brew's assistant and whether its key is set. Clips always need the xAI key.
     agent: agentProvider(),
     agentReady: agentsReady()[agentProvider()],
-    // Per-assistant readiness for the Grok/Claude tabs under Brew's text area.
+    // Per-assistant readiness for the Grok/Claude/OpenAI tabs under Brew's text area.
     agents: agentsReady(),
     youtubeApp: Boolean(cfg.YOUTUBE_CLIENT_ID && cfg.YOUTUBE_CLIENT_SECRET),
     youtubeConnected: youtube.connected,
@@ -1323,9 +1321,9 @@ async function orgRoute(req, res, url, ctx) {
   if (req.method === 'POST' && pathname === '/api/agent/message') {
     if (busyOrgs.has(ctx.org.id)) throw fail('Brew is already working on a request for this organisation.', 409);
     const body = await readJsonBody(req);
-    // The Grok/Claude tab the message was written in; omitted means the organisation's default.
+    // The Grok/Claude/OpenAI tab the message was written in; omitted means the organisation's default.
     const provider = body.provider == null || body.provider === '' ? undefined : String(body.provider);
-    if (provider !== undefined && !AGENT_PROVIDERS.includes(provider)) throw fail('Assistant must be grok or claude.');
+    if (provider !== undefined && !AGENT_PROVIDERS.includes(provider)) throw fail('Assistant must be grok, claude, or openai.');
     const text = String(body.text || '').trim();
     if (text.length > 8000) throw fail('That message is too long.');
     const mediaId = body.mediaId ? String(body.mediaId) : '';
@@ -1492,19 +1490,19 @@ async function emailRoute(req, res, pathname, ctx) {
     }
   }
 
-  // A first draft from Grok or Claude, from a short brief.
+  // A first draft from Grok, Claude, or OpenAI, from a short brief.
   if (req.method === 'POST' && pathname === '/api/email/draft') {
     const body = await readJsonBody(req);
     const brief = String(body.brief || '').trim().slice(0, 4000);
     if (!brief) throw fail('Describe what the email is about.');
     const provider = agentProvider(body.provider);
-    if (provider === 'claude' && !cfg.ANTHROPIC_API_KEY) throw fail('Add your Anthropic API key in Settings to draft with Claude.');
-    if (provider === 'grok' && !cfg.XAI_API_KEY) throw fail('Add your xAI API key in Settings to draft with Grok.');
+    const missing = agentKeyMissing(provider);
+    if (missing) throw fail(missing);
     const messages = [
       { role: 'system', content: DRAFT_SYSTEM },
       { role: 'user', content: `Organisation: ${ctx.org.name}\nBrief: ${brief}` },
     ];
-    const reply = provider === 'claude' ? await claudeChat({ messages }) : await grokChat({ messages });
+    const reply = await agentChat(provider, { messages });
     return sendJson(res, 200, { ...parseDraft(reply.content), provider, by: agentName(provider) });
   }
 

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { agentLabel, postNetwork, safeImage, safeLink, timeAgo, type Post } from '@/lib/api'
-import { useAssistant } from '@/lib/assistant'
+import { assistantMeta, useAssistant } from '@/lib/assistant'
 import { AssistantTabs } from '@/components/assistant-tabs'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, networkState } from '@/lib/networks'
@@ -86,7 +86,7 @@ export function OverviewPage() {
   const byGrok = posts?.filter((p) => ['agent', 'grok', 'claude', 'connector', 'extension'].includes(p.source || '')).length ?? 0
 
   const setup = [
-    { done: Boolean(health?.agentReady), label: `Add your ${health?.agent === 'claude' ? 'Anthropic' : 'xAI'} API key`, to: '/settings' },
+    { done: Boolean(health?.agentReady), label: `Add your ${assistantMeta(health?.agent).keyName} API key`, to: '/settings' },
     { done: Boolean(health?.youtubeConnected), label: 'Connect YouTube', to: '/connectors/youtube/connection' },
     { done: Boolean(health?.linkedinConnected), label: 'Connect LinkedIn', to: '/connectors/linkedin/connection' },
     { done: Boolean(health?.instagramConnected), label: 'Connect Instagram', to: '/connectors/instagram/connection' },
