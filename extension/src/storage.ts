@@ -2,16 +2,35 @@
 // never synced anywhere), runs, and attached or generated media (IndexedDB). Signing in only copies
 // runs to Socialbrewery (src/sync.ts); keys and media stay here.
 
-export type Provider = 'claude' | 'grok'
+export type Provider = 'claude' | 'grok' | 'openai'
+
+/** The assistants, with the key each one needs. */
+export const PROVIDERS: { id: Provider; label: string; keyName: string; keyField: 'anthropicKey' | 'xaiKey' | 'openaiKey' }[] = [
+  { id: 'claude', label: 'Claude', keyName: 'Anthropic', keyField: 'anthropicKey' },
+  { id: 'grok', label: 'Grok', keyName: 'xAI', keyField: 'xaiKey' },
+  { id: 'openai', label: 'OpenAI', keyName: 'OpenAI', keyField: 'openaiKey' },
+]
+
+export function providerInfo(provider: Provider) {
+  return PROVIDERS.find((p) => p.id === provider) || PROVIDERS[0]
+}
+
+/** The message shown when the selected assistant has no key yet. */
+export function missingKey(settings: Settings) {
+  const info = providerInfo(settings.provider)
+  return settings[info.keyField] ? '' : `Add your ${info.keyName} API key in Settings to use ${info.label}.`
+}
 
 export type Settings = {
   provider: Provider
   anthropicKey: string
   xaiKey: string
+  openaiKey: string
   claudeModel: string
   claudeEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   grokModel: string
   grokVideoModel: string
+  openaiModel: string
   /** The Socialbrewery app this extension signs in to and saves to. */
   serverUrl: string
 }
@@ -20,10 +39,12 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude',
   anthropicKey: '',
   xaiKey: '',
+  openaiKey: '',
   claudeModel: 'claude-opus-5-5',
   claudeEffort: 'medium',
   grokModel: 'grok-4.6',
   grokVideoModel: 'grok-imagine-video-1.5',
+  openaiModel: 'gpt-5.6-terra',
   serverUrl: 'https://socialbrewery.agarwal-aman041.workers.dev',
 }
 

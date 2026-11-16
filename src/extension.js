@@ -10,7 +10,7 @@ import { NETWORKS, addPost, readJson, updateJson } from './store.js';
 const MAX_RUNS = 100;
 const MAX_STEPS = 150;
 const MAX_BYTES = 1_500_000;
-const PROVIDERS = new Set(['claude', 'grok']);
+const PROVIDERS = new Set(['claude', 'grok', 'openai']);
 const STATUSES = new Set(['running', 'done', 'stopped', 'error']);
 const KINDS = new Set(['user', 'assistant', 'action', 'approval']);
 

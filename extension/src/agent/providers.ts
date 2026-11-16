@@ -1,9 +1,9 @@
-// Claude and Grok behind one small interface, with the user's own keys, called straight from the
+// Claude, Grok, and OpenAI behind one small interface, with the user's own keys, called straight from the
 // extension. Each run keeps its provider's own message history (append-only, which Claude's
 // thinking blocks require).
 
 import Anthropic from '@anthropic-ai/sdk'
-import type { Settings } from '../storage'
+import { missingKey, type Settings } from '../storage'
 import type { ToolResult, ToolSpec } from './tools'
 
 export type ToolCall = { id: string; name: string; input: Record<string, unknown> }
@@ -114,19 +114,49 @@ class ClaudeConversation implements Conversation {
   }
 }
 
-// ---------- Grok (xAI, OpenAI-style chat completions) ----------
+// ---------- Grok and OpenAI (both speak OpenAI-style chat completions) ----------
 
-type GrokMessage =
+type ChatMessage =
   | { role: 'system' | 'user'; content: string | ({ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } })[] }
   | { role: 'assistant'; content: string | null; tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[] }
   | { role: 'tool'; tool_call_id: string; content: string }
 
-class GrokConversation implements Conversation {
-  private messages: GrokMessage[]
+type ChatEndpoint = {
+  name: string
+  url: string
+  key: (s: Settings) => string
+  model: (s: Settings) => string
+  /** Extra request fields. OpenAI's reasoning models accept only the default temperature, so it sends none. */
+  extra: Record<string, unknown>
+  badKey: string
+}
+
+const GROK: ChatEndpoint = {
+  name: 'Grok',
+  url: 'https://api.x.ai/v1/chat/completions',
+  key: (s) => s.xaiKey,
+  model: (s) => s.grokModel,
+  extra: { temperature: 0.3 },
+  badKey: 'xAI did not accept your API key. Check it in Settings (it starts with xai-), then send again.',
+}
+
+const OPENAI: ChatEndpoint = {
+  name: 'OpenAI',
+  url: 'https://api.openai.com/v1/chat/completions',
+  key: (s) => s.openaiKey,
+  model: (s) => s.openaiModel,
+  extra: {},
+  badKey: 'OpenAI did not accept your API key. Check it in Settings (it starts with sk-), then send again.',
+}
+
+class ChatCompletionsConversation implements Conversation {
+  private messages: ChatMessage[]
   private settings: Settings
   private tools: object[]
+  private endpoint: ChatEndpoint
 
-  constructor(settings: Settings, system: string, tools: ToolSpec[]) {
+  constructor(endpoint: ChatEndpoint, settings: Settings, system: string, tools: ToolSpec[]) {
+    this.endpoint = endpoint
     this.settings = settings
     this.messages = [{ role: 'system', content: system }]
     this.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.schema } }))
@@ -141,20 +171,22 @@ class GrokConversation implements Conversation {
   }
 
   async next(signal: AbortSignal): Promise<Turn> {
-    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+    const { name, url, key, model, extra, badKey } = this.endpoint
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${this.settings.xaiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.settings.grokModel, messages: this.messages, tools: this.tools, temperature: 0.3 }),
+      headers: { Authorization: `Bearer ${key(this.settings)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model(this.settings), messages: this.messages, tools: this.tools, ...extra }),
       signal,
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
+      if (res.status === 401 || res.status === 403) throw new Error(badKey)
       const error = data?.error
-      throw new Error((typeof error === 'string' ? error : error?.message) || `Grok request failed (${res.status}).`)
+      throw new Error((typeof error === 'string' ? error : error?.message) || `${name} request failed (${res.status}).`)
     }
     const choice = data.choices?.[0]
     const message = choice?.message
-    if (!message) throw new Error('Grok returned an empty reply.')
+    if (!message) throw new Error(`${name} returned an empty reply.`)
     this.messages.push({ role: 'assistant', content: message.content ?? null, ...(message.tool_calls?.length ? { tool_calls: message.tool_calls } : {}) })
     const calls: ToolCall[] = (message.tool_calls || []).map((c: { id: string; function: { name: string; arguments: string } }) => {
       let input: Record<string, unknown> = {}
@@ -165,7 +197,8 @@ class GrokConversation implements Conversation {
       }
       return { id: c.id, name: c.function.name, input }
     })
-    const text = String(message.content || '').trim()
+    const text = String(message.content || message.refusal || '').trim()
+    if (message.refusal && !calls.length) return { text, calls: [], stop: 'refused' }
     if (choice.finish_reason === 'length') return { text, calls: [], stop: 'too_long' }
     return { text, calls, stop: calls.length ? 'tools' : 'done' }
   }
@@ -187,10 +220,8 @@ class GrokConversation implements Conversation {
 }
 
 export function startConversation(settings: Settings, system: string, tools: ToolSpec[]): Conversation {
-  if (settings.provider === 'claude') {
-    if (!settings.anthropicKey) throw new Error('Add your Anthropic API key in Settings to use Claude.')
-    return new ClaudeConversation(settings, system, tools)
-  }
-  if (!settings.xaiKey) throw new Error('Add your xAI API key in Settings to use Grok.')
-  return new GrokConversation(settings, system, tools)
+  const missing = missingKey(settings)
+  if (missing) throw new Error(missing)
+  if (settings.provider === 'claude') return new ClaudeConversation(settings, system, tools)
+  return new ChatCompletionsConversation(settings.provider === 'openai' ? OPENAI : GROK, settings, system, tools)
 }

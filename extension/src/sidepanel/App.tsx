@@ -5,7 +5,7 @@ import { CLAUDE_MODELS } from '@/agent/providers'
 import type { ApprovalRequest } from '@/agent/tools'
 import { syncLeads, syncRuns } from '@/sync'
 import { Markdown } from './markdown'
-import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
+import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, missingKey, PROVIDERS, providerInfo, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Run, type Settings, type Step } from '@/storage'
 import { useAccount } from './account'
 
 type View = 'chat' | 'history' | 'leads' | 'settings'
@@ -100,12 +100,15 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (n
         <h2 className="flex items-center gap-1.5 font-semibold">
           <KeyRound className="size-4" /> Your API keys
         </h2>
-        <p className="text-xs text-muted-foreground">Kept only in this browser and sent only to Anthropic or xAI. Signing in never uploads them.</p>
+        <p className="text-xs text-muted-foreground">Kept only in this browser and sent only to Anthropic, xAI, or OpenAI. Signing in never uploads them.</p>
         <Field label="Anthropic API key (Claude)" hint="From console.anthropic.com → API keys.">
           <input className={inputClass} type="password" autoComplete="off" value={settings.anthropicKey} onChange={(e) => set('anthropicKey', e.target.value.trim())} placeholder="sk-ant-…" />
         </Field>
-        <Field label="xAI API key (Grok)" hint="From console.x.ai. Also needed to generate video clips.">
+        <Field label="xAI API key (Grok)" hint="From console.x.ai. Video clips always use Grok Imagine, so this is needed for clips whichever assistant you chat with.">
           <input className={inputClass} type="password" autoComplete="off" value={settings.xaiKey} onChange={(e) => set('xaiKey', e.target.value.trim())} placeholder="xai-…" />
+        </Field>
+        <Field label="OpenAI API key" hint="From platform.openai.com → API keys.">
+          <input className={inputClass} type="password" autoComplete="off" value={settings.openaiKey} onChange={(e) => set('openaiKey', e.target.value.trim())} placeholder="sk-…" />
         </Field>
       </section>
 
@@ -133,6 +136,9 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (n
           </Field>
           <Field label="Grok video model">
             <input className={inputClass} value={settings.grokVideoModel} onChange={(e) => set('grokVideoModel', e.target.value.trim())} />
+          </Field>
+          <Field label="OpenAI model">
+            <input className={inputClass} value={settings.openaiModel} onChange={(e) => set('openaiModel', e.target.value.trim())} />
           </Field>
         </div>
       </section>
@@ -196,7 +202,7 @@ function HistoryView({ onOpen, onChanged }: { onOpen: (run: Run) => void; onChan
           <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(run)}>
             <p className="truncate font-medium">{run.title || 'Untitled'}</p>
             <p className="text-xs text-muted-foreground">
-              {new Date(run.updatedAt).toLocaleString()} · {run.provider === 'claude' ? 'Claude' : 'Grok'}
+              {new Date(run.updatedAt).toLocaleString()} · {providerInfo(run.provider).label}
               {run.posts.length ? ` · ${run.posts.length} posted` : ''}
             </p>
           </button>
@@ -332,7 +338,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
   const fileInput = useRef<HTMLInputElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
 
-  const keyMissing = settings.provider === 'claude' ? !settings.anthropicKey : !settings.xaiKey
+  const keyMissing = Boolean(missingKey(settings))
 
   const update = useCallback((fn: (r: Run) => Run) => {
     if (!runRef.current) return
@@ -456,7 +462,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         <span className="font-semibold">Socialbrewery</span>
         <div className="ml-auto flex items-center gap-1">
           <div className="flex rounded-lg border border-border p-0.5" role="group" aria-label="Model">
-            {(['claude', 'grok'] as Provider[]).map((p) => (
+            {PROVIDERS.map(({ id: p, label }) => (
               <button
                 key={p}
                 disabled={running}
@@ -466,7 +472,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                 }}
                 className={cn('rounded-md px-2 py-0.5 text-xs font-medium', settings.provider === p ? 'bg-p1 text-ink' : 'text-muted-foreground')}
               >
-                {p === 'claude' ? 'Claude' : 'Grok'}
+                {label}
               </button>
             ))}
           </div>
@@ -533,7 +539,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
           <div className="space-y-2 p-3">
             {!run && (
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-                <p className="font-medium">Tell {settings.provider === 'claude' ? 'Claude' : 'Grok'} what to post, or who to find.</p>
+                <p className="font-medium">Tell {providerInfo(settings.provider).label} what to post, or who to find.</p>
                 <p className="text-muted-foreground">
                   It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode. It fills everything in, then waits for you to approve before anything is published. It can also search Reddit for people who need what you make and keep them under Leads.
                 </p>
@@ -546,7 +552,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                 </ul>
                 {keyMissing && (
                   <Button variant="outline" onClick={() => setView('settings')}>
-                    <KeyRound /> Add your {settings.provider === 'claude' ? 'Anthropic' : 'xAI'} key
+                    <KeyRound /> Add your {providerInfo(settings.provider).keyName} key
                   </Button>
                 )}
               </div>

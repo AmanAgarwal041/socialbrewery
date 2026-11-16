@@ -18,7 +18,7 @@ export const ORG_FIELDS = [
     key: 'AGENT_PROVIDER',
     label: 'Assistant',
     secret: false,
-    help: 'Who runs Brew by default and writes drafts: grok or claude. Brew\'s Grok/Claude tabs switch per message. Video clips are always generated with Grok.',
+    help: 'Who runs Brew by default and writes drafts: grok, claude, or openai. Brew\'s tabs switch per message. Every assistant can make video clips, which are always generated with Grok Imagine and need the xAI key.',
   },
   {
     key: 'XAI_API_KEY',
@@ -60,13 +60,13 @@ export const ORG_FIELDS = [
     key: 'OPENAI_API_KEY',
     label: 'OpenAI API key',
     secret: true,
-    help: 'From platform.openai.com. Used only when a video review is set to OpenAI.',
+    help: 'From platform.openai.com. Used when the assistant or the reviews are set to OpenAI.',
   },
   {
     key: 'OPENAI_MODEL',
     label: 'OpenAI model',
     secret: false,
-    help: 'Default gpt-5.6-terra. Change this to a chat model from your OpenAI account if a review fails.',
+    help: 'Default gpt-5.6-terra. Change this to a chat model from your OpenAI account if a request fails.',
   },
   {
     key: 'ELEVENLABS_API_KEY',
@@ -470,7 +470,7 @@ export function normalizeOrgSettings(input, current = {}, clear = []) {
     );
   }
   const agent = String(values.AGENT_PROVIDER || 'grok').toLowerCase();
-  if (!['grok', 'claude'].includes(agent)) errors.push('Assistant must be grok or claude.');
+  if (!['grok', 'claude', 'openai'].includes(agent)) errors.push('Assistant must be grok, claude, or openai.');
   else values.AGENT_PROVIDER = agent;
 
   return { values, errors };

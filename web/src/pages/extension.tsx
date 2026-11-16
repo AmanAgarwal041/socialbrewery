@@ -16,7 +16,7 @@ const STEPS = [
   'Turn on Developer mode, top right.',
   'Click Load unpacked and choose the unzipped socialbrewery-extension folder.',
   'Pin Socialbrewery from the puzzle-piece menu, then click it to open the side panel.',
-  'In the panel’s Settings, add your Anthropic key (Claude) or xAI key (Grok).',
+  'In the panel’s Settings, add your Anthropic key (Claude), xAI key (Grok), or OpenAI key.',
 ]
 
 export function ExtensionPage() {
@@ -78,7 +78,7 @@ export function ExtensionPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="text-sm text-muted-foreground">
-              It runs on your own Anthropic or xAI key, which stays in your browser. Sign in to Socialbrewery only if you want your runs saved: signed in here, the
+              It runs on your own Anthropic, xAI, or OpenAI key, which stays in your browser. Sign in to Socialbrewery only if you want your runs saved: signed in here, the
               extension is signed in too, what it posts shows up in your organisation’s Posts, and the Reddit leads it finds show up under Reddit → Leads.
             </CardContent>
           </Card>

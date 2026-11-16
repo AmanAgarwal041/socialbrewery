@@ -269,7 +269,7 @@ function Thinking({ status, agent }: { status: string; agent: string }) {
   )
 }
 
-function EmptyChat({ onPick, agent, ready }: { onPick: (prompt: string, target: NetworkId | 'any') => void; agent: string; ready: boolean }) {
+function EmptyChat({ onPick, agent, keyName, ready }: { onPick: (prompt: string, target: NetworkId | 'any') => void; agent: string; keyName: string; ready: boolean }) {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-4 py-10 text-center">
       <div className="bg-palette mb-5 flex size-16 items-center justify-center rounded-3xl text-ink shadow-md">
@@ -278,11 +278,11 @@ function EmptyChat({ onPick, agent, ready }: { onPick: (prompt: string, target: 
       <h1 className="text-3xl font-semibold tracking-tight">What should we brew today?</h1>
       <p className="mt-2 max-w-lg text-sm text-muted-foreground">
         Ask {agent} to write the copy, generate a vertical clip, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit.
-        Attach a video to post your own.{agent === 'Claude' && ' Clips are still generated with Grok Imagine, so that needs your xAI key.'}
+        Attach a video to post your own.{agent !== 'Grok' && ` ${agent} can make clips too: they are generated with Grok Imagine, so that needs your xAI key.`}
       </p>
       {!ready && (
         <p className="mt-4 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Add your {agent === 'Claude' ? 'Anthropic' : 'xAI'} API key in Settings before chatting.
+          Add your {keyName} API key in Settings before chatting.
         </p>
       )}
       <div className="mt-8 grid w-full gap-3 sm:grid-cols-2 sm:[&>*:last-child:nth-child(odd)]:col-span-2">
@@ -485,6 +485,7 @@ export function BrewPage() {
     body = (
       <EmptyChat
         agent={agent}
+        keyName={assistant.keyName}
         ready={health ? assistant.ready : true}
         onPick={(prompt, t) => {
           setText(prompt)
