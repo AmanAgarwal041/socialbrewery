@@ -103,15 +103,16 @@ export const TOOLS: ToolSpec[] = [
   {
     name: 'make_motion_video',
     description:
-      'Make a motion-graphics video (kinetic text, counted-up numbers, animated screenshots, end card with CTA) and render it to MP4 for free in this browser. No video API or key needed, so it works with every assistant. Call get_motion_guide first. A render tab opens for about as long as the video (up to 90 s of video); there is no audio. Returns a file id for upload_file and a contact sheet of four frames: look at it and fix the scenes before posting if anything is cut off or hard to read.',
+      'Make a motion-graphics video (kinetic text, counted-up numbers, animated screenshots, end card with CTA) and render it to MP4 for free in this browser. No video API or key needed, so it works with every assistant. Call get_motion_guide first. Every video has a voiceover by default, in the voice the user picked in Settings (their own clone, a paid voice, or a free voice that runs on this computer): write a narration line for each scene; scenes stretch to fit. A render tab opens for about as long as the video (up to 90 s of video). Returns a file id for upload_file and a contact sheet of four frames: look at it and fix the scenes before posting if anything is cut off or hard to read.',
     schema: obj(
       {
         format: { type: 'string', enum: ['9x16', '16x9'], description: '9x16 (1080x1920) for Shorts, Reels, TikTok; 16x9 (1920x1080) for YouTube, LinkedIn, X.' },
         brand: { type: 'object', description: 'Optional brand kit: { name, colors: { bg, ink, muted, accent, button, buttonText, card } as hex, cta: { label, url } }.' },
-        scenes: { type: 'array', items: { ...SCENE_SCHEMA, properties: { ...(SCENE_SCHEMA.properties as object), image: { type: 'string', description: 'A REAL screenshot: an https URL, or file:<id> of an image from list_files.' } } } },
+        scenes: { type: 'array', items: { ...SCENE_SCHEMA, properties: { ...(SCENE_SCHEMA.properties as object), image: { type: 'string', description: 'A REAL screenshot: an https URL, or file:<id> of an image from list_files.' }, narration: { type: 'string', description: 'What the narrator says over this scene: one or two short spoken sentences that add to the on-screen text. Defaults to the headline and sub; "" keeps the scene silent.' } } } },
         cta: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } } },
         question: { type: 'string', description: 'Open question for the end card.' },
         fps: { type: 'integer', enum: [24, 30, 60] },
+        voiceover: { type: 'boolean', description: 'Default true. false only when the user asked for a silent video.' },
       },
       ['scenes'],
     ),
@@ -287,9 +288,10 @@ export function createExecutor(ctx: ToolContext) {
     },
 
     async make_motion_video(input) {
-      const result = await renderMotionVideo(input as unknown as MotionInput, { signal: ctx.signal, onProgress: ctx.progress })
+      const result = await renderMotionVideo(input as unknown as MotionInput, { signal: ctx.signal, onProgress: ctx.progress, settings: ctx.settings })
+      const audio = result.voice ? `voiceover in the ${result.voice.label} (${result.audioCodec === 'aac' ? 'AAC' : 'Opus'})` : 'no audio'
       return {
-        text: `Rendered ${result.file.name}: ${result.seconds.toFixed(1)} s, ${result.width}x${result.height}, ${result.codec === 'avc' ? 'H.264' : 'VP9'}, ${(result.file.size / 1024 / 1024).toFixed(1)} MB. File id: ${result.file.id}. The image is four frames at 15%, 40%, 65%, and 90%.`,
+        text: `Rendered ${result.file.name}: ${result.seconds.toFixed(1)} s, ${result.width}x${result.height}, ${result.codec === 'avc' ? 'H.264' : 'VP9'}, ${audio}, ${(result.file.size / 1024 / 1024).toFixed(1)} MB. File id: ${result.file.id}.${result.note ? ` Note: ${result.note}` : ''} The image is four frames at 15%, 40%, 65%, and 90%.`,
         image: { data: result.sheet, mime: 'image/jpeg' },
       }
     },

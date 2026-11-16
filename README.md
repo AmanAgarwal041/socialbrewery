@@ -74,7 +74,7 @@ Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyz
 The connector also carries a Video Studio: brand kits, a style guide, motion styles (cinematic, graph to 3D pillars,
 prompt-motion effects, product launch, brag-style storytelling, pastel explainer, kinetic typography, soft pop), agent playbooks, HyperFrames + GSAP
 templates, ElevenLabs or Kokoro voiceovers, and an MP4 renderer that drops the video into the media library for the
-posting tools. The Chrome extension renders the same compositions for free in your browser (`make_motion_video`, no video API or key). Full guide: [docs/video-studio.md](docs/video-studio.md).
+posting tools. The Chrome extension renders the same compositions for free in your browser (`make_motion_video`, no video API or key), with a voiceover by default: your own cloned voice, an xAI/OpenAI/ElevenLabs voice, or a free open voice (Supertonic) that runs on your computer. Full guide: [docs/video-studio.md](docs/video-studio.md).
 
 1. Connect the connector as above. In **Claude Desktop / claude.ai** add the Claude URL as a custom connector; in
    **Claude Code** run `claude mcp add --transport http socialbrewery "<Claude URL>"`; in **Grok** add the Grok URL on grok.com/connectors.
