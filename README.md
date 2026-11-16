@@ -69,12 +69,12 @@ Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its o
 Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, `search_reddit`, `save_reddit_leads`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
 
 
-## Video Studio (make videos from Claude or Grok)
+## Video Studio (make videos from Claude, Grok, or OpenAI)
 
 The connector also carries a Video Studio: brand kits, a style guide, motion styles (cinematic, graph to 3D pillars,
-prompt-motion effects, product launch, brag-style storytelling, pastel explainer), agent playbooks, HyperFrames + GSAP
+prompt-motion effects, product launch, brag-style storytelling, pastel explainer, kinetic typography, soft pop), agent playbooks, HyperFrames + GSAP
 templates, ElevenLabs or Kokoro voiceovers, and an MP4 renderer that drops the video into the media library for the
-posting tools. Full guide: [docs/video-studio.md](docs/video-studio.md).
+posting tools. The Chrome extension renders the same compositions for free in your browser (`make_motion_video`, no video API or key). Full guide: [docs/video-studio.md](docs/video-studio.md).
 
 1. Connect the connector as above. In **Claude Desktop / claude.ai** add the Claude URL as a custom connector; in
    **Claude Code** run `claude mcp add --transport http socialbrewery "<Claude URL>"`; in **Grok** add the Grok URL on grok.com/connectors.

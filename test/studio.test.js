@@ -71,6 +71,31 @@ test('composeHtml builds a HyperFrames composition from scenes and a brand', () 
   assert.throws(() => composeHtml({ scenes: [{ headline: 'x', effect: 'pillars' }] }), /measured bar heights/);
 });
 
+test('the new motion effects compose: pop, kinetic, split, wipe, and a counted-up stat', () => {
+  const out = composeHtml({
+    scenes: [
+      { headline: 'Your agent broke at 2am', effect: 'kinetic', duration: 3 },
+      { headline: 'Logs say nothing. Traces say everything.', effect: 'split', duration: 2.5 },
+      { headline: 'of failures are tool calls', stat: { value: 73.5, suffix: '%<b>', decimals: 1 }, effect: 'counter', duration: 3 },
+      { headline: 'Fix it', effect: 'pop', duration: 2 },
+      { headline: 'Here is the fix', effect: 'wipe', duration: 2 },
+    ],
+  });
+  assert.equal(out.duration, 12.5);
+  assert.match(out.html, /<div class="stat"><span class="num" data-value="73.5" data-decimals="1">0.0<\/span>%&lt;b&gt;<\/div>/);
+  assert.match(out.html, /<div class="wipe"><\/div>/);
+  assert.match(out.html, /fx === 'kinetic'/);
+  assert.throws(() => composeHtml({ scenes: [{ headline: 'x', effect: 'counter' }] }), /stat.value/);
+});
+
+test('the browser renderer shares the pure composition module', async () => {
+  const pure = await import('../src/studio-compose.js');
+  const out = pure.composeHtml(STUDIO_FILES['templates/composition.html'], { brand: normalizeBrand({}), scenes: [{ headline: 'Hi', duration: 2 }] });
+  assert.equal(out.html, composeHtml({ scenes: [{ headline: 'Hi', duration: 2 }] }).html);
+  assert.ok(pure.SCENE_SCHEMA.properties.stat);
+  assert.ok(pure.EFFECTS.includes('counter'));
+});
+
 test('atempo chains stay inside ffmpeg limits', () => {
   assert.equal(atempoChain(1.25), 'atempo=1.25');
   assert.equal(atempoChain(3), 'atempo=2.0,atempo=1.5');

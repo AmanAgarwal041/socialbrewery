@@ -38,6 +38,8 @@ html, body { width: {{W}}px; height: {{H}}px; overflow: hidden; background: var(
 .question { font-weight: 800; font-size: calc(var(--u) * 4.4); text-align: center; max-width: 88%; }
 .url { font-family: var(--mono), monospace; font-size: calc(var(--u) * 2.2); color: var(--muted); }
 #line { position: absolute; left: 0; top: 50%; height: 6px; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+.stat { font-weight: 900; font-size: calc(var(--u) * var(--hsize) * 1.9); line-height: 1; letter-spacing: -0.04em; color: var(--accent); font-variant-numeric: tabular-nums; position: relative; z-index: 2; }
+.wipe { position: absolute; inset: 0; background: var(--accent); transform-origin: right; z-index: 3; pointer-events: none; }
 .caption { position: absolute; left: 0; right: 0; top: auto; bottom: var(--capy); padding: 0 calc(var(--u) * 4); text-align: center; font-weight: 850; font-size: calc(var(--u) * 3.6); text-shadow: 0 4px 18px rgba(0,0,0,.8); }
 </style>
 </head>
@@ -67,10 +69,33 @@ html, body { width: {{W}}px; height: {{H}}px; overflow: hidden; background: var(
     else if (fx === 'rack') tl.from(el, { filter: 'blur(14px)', scale: 0.96, duration: 0.75, ease: 'power2.inOut' }, t);
     var slats = el.querySelectorAll('.slats i');
     if (slats.length) tl.to(slats, { scaleY: 0, duration: 0.45, stagger: 0.04, ease: 'power3.inOut' }, t);
-    if (words.length) tl.from(words, { y: 80, opacity: 0, duration: 0.3, stagger: 0.07, ease: 'expo.out' }, t + 0.1);
+    var wipe = el.querySelector('.wipe');
+    if (wipe) tl.fromTo(wipe, { scaleX: 1 }, { scaleX: 0, duration: 0.6, ease: 'power4.inOut' }, t);
+    var lead = el.querySelectorAll('.kicker, .stat, .headline, .sub, .shot, .btn');
+    if (fx === 'pop') {
+      // Soft, clay-like entrance: each block squashes in and settles.
+      tl.from(lead, { scale: 0, duration: 0.7, stagger: 0.12, ease: 'elastic.out(1, 0.55)' }, t + 0.05);
+      tl.from(lead, { scaleY: 0.7, scaleX: 1.25, duration: 0.45, stagger: 0.12, ease: 'power2.out' }, t + 0.05);
+    } else if (fx === 'kinetic' && words.length) {
+      // Kinetic type: one word at a time, big and turning, then the line settles.
+      tl.from(words, { scale: 2.6, rotation: function (k) { return k % 2 ? 12 : -12; }, opacity: 0, duration: 0.42, stagger: Math.min(0.32, (d * 0.5) / words.length), ease: 'back.out(2)' }, t + 0.1);
+    } else if (fx === 'split' && words.length) {
+      var half = Math.ceil(words.length / 2);
+      tl.from(Array.prototype.slice.call(words, 0, half), { x: -900, opacity: 0, duration: 0.6, ease: 'expo.out' }, t + 0.1);
+      tl.from(Array.prototype.slice.call(words, half), { x: 900, opacity: 0, duration: 0.6, ease: 'expo.out' }, t + 0.1);
+    } else if (words.length) tl.from(words, { y: 80, opacity: 0, duration: 0.3, stagger: 0.07, ease: 'expo.out' }, t + 0.1);
+    var num = el.querySelector('.stat .num');
+    if (num) {
+      var target = Number(num.getAttribute('data-value')) || 0;
+      var places = Number(num.getAttribute('data-decimals')) || 0;
+      var counter = { v: 0 };
+      tl.from(num.parentNode, { y: 60, opacity: 0, duration: 0.4, ease: 'power3.out' }, t);
+      tl.to(counter, { v: target, duration: Math.min(2.2, d * 0.6), ease: 'power2.out', onUpdate: function () { num.textContent = counter.v.toLocaleString('en-US', { minimumFractionDigits: places, maximumFractionDigits: places }); } }, t + 0.15);
+    }
     var sub = el.querySelector('.sub'); if (sub) tl.from(sub, { y: 30, opacity: 0, duration: 0.4, ease: 'power3.out' }, t + 0.35);
     if (shot) {
-      if (fx === 'hinge') tl.from(shot, { rotationX: -70, transformOrigin: '50% 100%', opacity: 0, duration: 0.7, ease: 'power3.out' }, t + 0.2);
+      if (fx === 'pop') { /* entrance done above */ }
+      else if (fx === 'hinge') tl.from(shot, { rotationX: -70, transformOrigin: '50% 100%', opacity: 0, duration: 0.7, ease: 'power3.out' }, t + 0.2);
       else tl.from(shot, { y: 60, rotationY: 6, opacity: 0, duration: 0.6, ease: 'power3.out' }, t + 0.2);
       var f = s.focus || { x: 50, y: 50, scale: 1.6 };
       tl.to(shot, { scale: f.scale || 1.6, transformOrigin: f.x + '% ' + f.y + '%', duration: Math.min(1.4, d * 0.35), ease: 'power2.inOut' }, t + Math.max(0.9, d * 0.35));
@@ -84,7 +109,7 @@ html, body { width: {{W}}px; height: {{H}}px; overflow: hidden; background: var(
     }
     var loader = el.querySelectorAll('.loader b');
     if (loader.length) tl.to(loader, { rotation: '+=720', duration: d, ease: 'none', stagger: 0.1 }, t);
-    var btn = el.querySelector('.btn'); if (btn) tl.from(btn, { scale: 0.6, opacity: 0, duration: 0.5, ease: 'back.out(1.7)' }, t + 0.6);
+    var btn = el.querySelector('.btn'); if (btn && fx !== 'pop') tl.from(btn, { scale: 0.6, opacity: 0, duration: 0.5, ease: 'back.out(1.7)' }, t + 0.6);
     var q = el.querySelector('.question'); if (q) tl.from(q, { y: 40, opacity: 0, duration: 0.5, ease: 'power3.out' }, t + Math.min(1.6, d * 0.4));
     var next = spec.scenes[i + 1];
     if (next && next.effect === 'zoom-through') tl.to(el, { scale: 8, opacity: 0, duration: 0.4, ease: 'power3.in' }, t + d - 0.4);
