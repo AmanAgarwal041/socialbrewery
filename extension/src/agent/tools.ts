@@ -4,6 +4,8 @@
 
 import type { AgentTab } from './browser'
 import { generateVideo } from './video'
+import { motionGuide, renderMotionVideo, type MotionInput } from './motion'
+import { SCENE_SCHEMA } from '../../../src/studio-compose.js'
 import { GENERIC_PUBLISH, playbookFor } from './playbooks'
 import { createResearchHandlers, RESEARCH_TOOLS } from './research'
 import { getFile, listFiles, type PostRecord, type Settings } from '../storage'
@@ -84,7 +86,7 @@ export const TOOLS: ToolSpec[] = [
   },
   {
     name: 'list_files',
-    description: 'Videos and images the user attached or Grok generated, with their ids, for upload_file.',
+    description: 'Videos and images the user attached, Grok generated, or make_motion_video rendered, with their ids, for upload_file.',
     schema: obj({}),
   },
   {
@@ -97,6 +99,27 @@ export const TOOLS: ToolSpec[] = [
     name: 'generate_video',
     description: 'Generate a new vertical (9:16) clip with Grok Imagine from a prompt, 1 to 15 seconds. Works with every assistant (Claude, Grok, or OpenAI) but always needs the user\'s xAI key, since Grok Imagine is the only video model available. Returns a file id for upload_file. Takes a minute or more.',
     schema: obj({ prompt: { type: 'string' }, seconds: { type: 'integer' } }, ['prompt']),
+  },
+  {
+    name: 'make_motion_video',
+    description:
+      'Make a motion-graphics video (kinetic text, counted-up numbers, animated screenshots, end card with CTA) and render it to MP4 for free in this browser. No video API or key needed, so it works with every assistant. Call get_motion_guide first. A render tab opens for about as long as the video (up to 90 s of video); there is no audio. Returns a file id for upload_file and a contact sheet of four frames: look at it and fix the scenes before posting if anything is cut off or hard to read.',
+    schema: obj(
+      {
+        format: { type: 'string', enum: ['9x16', '16x9'], description: '9x16 (1080x1920) for Shorts, Reels, TikTok; 16x9 (1920x1080) for YouTube, LinkedIn, X.' },
+        brand: { type: 'object', description: 'Optional brand kit: { name, colors: { bg, ink, muted, accent, button, buttonText, card } as hex, cta: { label, url } }.' },
+        scenes: { type: 'array', items: { ...SCENE_SCHEMA, properties: { ...(SCENE_SCHEMA.properties as object), image: { type: 'string', description: 'A REAL screenshot: an https URL, or file:<id> of an image from list_files.' } } } },
+        cta: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } } },
+        question: { type: 'string', description: 'Open question for the end card.' },
+        fps: { type: 'integer', enum: [24, 30, 60] },
+      },
+      ['scenes'],
+    ),
+  },
+  {
+    name: 'get_motion_guide',
+    description: 'The Video Studio guide for make_motion_video: motion styles (kinetic typography, soft pop, product launch, cinematic, and more), copy rules, and scene effects. Pass a style id to read one in full.',
+    schema: obj({ style: { type: 'string' } }),
   },
   {
     name: 'record_post',
@@ -261,6 +284,18 @@ export function createExecutor(ctx: ToolContext) {
       if (!ctx.settings.xaiKey) return { text: 'Generating video needs an xAI API key. Ask the user to add one in Settings.', isError: true }
       const file = await generateVideo({ apiKey: ctx.settings.xaiKey, model: ctx.settings.grokVideoModel, prompt: String(prompt || ''), seconds: Number(seconds) || 8, signal: ctx.signal, onProgress: ctx.progress })
       return { text: `Generated ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB). File id: ${file.id}` }
+    },
+
+    async make_motion_video(input) {
+      const result = await renderMotionVideo(input as unknown as MotionInput, { signal: ctx.signal, onProgress: ctx.progress })
+      return {
+        text: `Rendered ${result.file.name}: ${result.seconds.toFixed(1)} s, ${result.width}x${result.height}, ${result.codec === 'avc' ? 'H.264' : 'VP9'}, ${(result.file.size / 1024 / 1024).toFixed(1)} MB. File id: ${result.file.id}. The image is four frames at 15%, 40%, 65%, and 90%.`,
+        image: { data: result.sheet, mime: 'image/jpeg' },
+      }
+    },
+
+    async get_motion_guide({ style }) {
+      return { text: motionGuide(style ? String(style) : '') }
     },
 
     async record_post({ network, url, title }) {

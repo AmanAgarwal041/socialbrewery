@@ -179,7 +179,7 @@ export async function removeLeads(keys: string[]) {
 
 // ---------- media ----------
 
-export type MediaFile = { id: string; name: string; mime: string; size: number; source: 'upload' | 'grok'; createdAt: number }
+export type MediaFile = { id: string; name: string; mime: string; size: number; source: 'upload' | 'grok' | 'render'; createdAt: number }
 
 function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
