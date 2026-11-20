@@ -16,6 +16,7 @@ import { AuthSplash, ChooseOrgPage, LoginPage, SetupPage } from '@/pages/login'
 import { NetworkPage } from '@/pages/network'
 import { OrganisationPage } from '@/pages/organisation'
 import { OverviewPage } from '@/pages/overview'
+import { PublishPage } from '@/pages/publish'
 import { SettingsPage } from '@/pages/settings'
 
 function AppRoutes() {
@@ -61,6 +62,7 @@ function DashboardRoutes() {
         <Route index element={<OverviewPage />} />
         <Route path="overview" element={<OverviewPage />} />
         <Route path="brew" element={<BrewPage />} />
+        <Route path="publish" element={<PublishPage />} />
         <Route path="connectors" element={<ConnectorsPage />} />
         <Route path="connectors/grok" element={<AiConnectorPage client="grok" />} />
         <Route path="connectors/claude" element={<AiConnectorPage client="claude" />} />

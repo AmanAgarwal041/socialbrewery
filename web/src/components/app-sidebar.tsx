@@ -17,6 +17,7 @@ import {
   Plus,
   Puzzle,
   Search,
+  Send,
   Settings,
   Sparkles,
   X,
@@ -69,6 +70,7 @@ function useNav() {
     const home = guest ? '/overview' : '/'
     const primary: NavItem[] = [
       { label: 'Overview', to: home, icon: <LayoutDashboard className="size-4" />, active: pathname === '/' || pathname === '/overview', keywords: 'home dashboard' },
+      { label: 'Publish video', to: '/publish', icon: <Send className="size-4" />, active: pathname.startsWith('/publish'), keywords: 'upload video post everywhere cross-post multi' },
       { label: 'Email', to: '/email', icon: <Mail className="size-4" />, active: pathname.startsWith('/email'), keywords: 'campaigns leads newsletter' },
       { label: 'Chrome extension', to: '/extension', icon: <Puzzle className="size-4" />, active: pathname.startsWith('/extension'), keywords: 'browser side panel' },
     ]

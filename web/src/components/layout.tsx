@@ -23,6 +23,7 @@ function crumbs(pathname: string): { label: string; to?: string }[] {
   const parts = pathname.split('/').filter(Boolean)
   if (!parts.length || parts[0] === 'overview') return [{ label: 'Overview' }]
   if (parts[0] === 'brew') return [{ label: 'Brew' }]
+  if (parts[0] === 'publish') return [{ label: 'Publish' }]
   if (parts[0] === 'settings') return [{ label: 'Settings' }]
   if (parts[0] === 'organisation') return [{ label: 'Organisation' }]
   if (parts[0] === 'extension') return [{ label: 'Chrome extension' }]

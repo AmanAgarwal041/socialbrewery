@@ -55,7 +55,7 @@ import { sign, verifySignature } from './secure.js';
 import { AGENT_PROVIDERS, agentChat, agentKeyMissing, agentName, agentProvider, agentsReady, runAgent } from './agent.js';
 import { publicDir } from './paths.js';
 import { blobSize, blobStream, maxVideoBytes } from './storage.js';
-import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listPosts, loadHistory, mediaPath } from './store.js';
+import { clearHistory, createMedia, ensureData, enqueue, getMedia, listAnalyses, listMedia, listPosts, loadHistory, mediaPath } from './store.js';
 import { analyzeVideo } from './analysis.js';
 import { connectorDetails, connectorTokenFrom, handleRpc, mcpClientFrom } from './mcp.js';
 import {
@@ -1209,6 +1209,11 @@ async function orgRoute(req, res, url, ctx) {
   if (req.method === 'POST' && pathname === '/api/x/disconnect') {
     await disconnectX();
     sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/media') {
+    sendJson(res, 200, { media: await listMedia() });
     return;
   }
 
