@@ -4,21 +4,14 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STUDIO_FILES } from './studio-pack.js';
+import { EFFECTS, FORMATS, TEMPLATES, composeHtml as composeWith, noDashes, normalizeBrand as normalizeBrandWith, normalizeScenes } from './studio-compose.js';
+
+export { EFFECTS, FORMATS, TEMPLATES, normalizeScenes };
 import { cfg, orgDataDir } from './context.js';
 import { root } from './paths.js';
 import { createMedia, readJson, updateJson, writeJson } from './store.js';
 import { onWorkers, readBlobRange, blobSize, writeBlob } from './storage.js';
 
-export const FORMATS = {
-  '9x16': { w: 1080, h: 1920, u: 20, hsize: 6.4, shotw: '92%', capy: '300px' },
-  '16x9': { w: 1920, h: 1080, u: 20, hsize: 5.2, shotw: '72%', capy: '70px' },
-};
-export const TEMPLATES = {
-  'short-vertical': { format: '9x16', description: 'Vertical Short, 1080x1920, 20 to 60 s.' },
-  'launch-landscape': { format: '16x9', description: 'Landscape launch or promo, 1920x1080, 30 to 90 s.' },
-};
-export const EFFECTS = ['focus', 'zoom-through', 'rack', 'hinge', 'slats', 'shutter', 'pillars', 'endcard'];
-const MAX_SCENES = 30;
 
 // ---------- Knowledge pack ----------
 
@@ -79,23 +72,8 @@ export async function listBrandKits() {
   return [...builtInBrands().map((b) => ({ ...b, builtIn: true })), ...(Array.isArray(custom) ? custom : [])];
 }
 
-const HEX = /^#[0-9a-f]{3,8}$/i;
-
 export function normalizeBrand(input = {}, base = JSON.parse(STUDIO_FILES['brands/default.json'])) {
-  const out = structuredClone(base);
-  if (input.id) out.id = String(input.id).toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 40);
-  for (const key of ['name', 'tagline', 'logoUrl', 'website', 'github', 'notes']) {
-    if (input[key] != null) out[key] = String(input[key]).slice(0, 500);
-  }
-  for (const [key, value] of Object.entries(input.colors || {})) {
-    if (!HEX.test(String(value))) throw new Error(`Brand color ${key} must be a hex color like #C2410C.`);
-    out.colors[key] = value;
-  }
-  if (input.fonts) out.fonts = { ...out.fonts, ...input.fonts };
-  if (input.voice) out.voice = { ...out.voice, ...input.voice };
-  if (input.cta) out.cta = { ...out.cta, ...input.cta };
-  if (Array.isArray(input.keywords)) out.keywords = input.keywords.map(String).slice(0, 30);
-  return out;
+  return normalizeBrandWith(input, base);
 }
 
 export async function saveBrandKit(input) {
@@ -132,109 +110,8 @@ export async function getVideoPlaybook({ playbook = 'launch-video', style, brand
 
 // ---------- Compose ----------
 
-const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const noDashes = (s) => String(s ?? '').replace(/\s*[\u2013\u2014]\s*/g, ', ');
-
-function imageSrc(src) {
-  const value = String(src || '');
-  if (!value) return '';
-  if (/^https:\/\//i.test(value) || /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(value) || /^assets\/[\w.-]+$/.test(value)) return value;
-  throw new Error('Scene images must be https URLs, data:image URIs, or assets/<file> from add_studio_asset.');
-}
-
-function headlineHtml(text, highlight) {
-  return noDashes(text).split(/\s+/).filter(Boolean).map((word) => {
-    const hl = highlight && word.toLowerCase().replace(/[^\w]/g, '') === String(highlight).toLowerCase().replace(/[^\w]/g, '');
-    return `<span class="w${hl ? ' hl' : ''}">${escapeHtml(word)}</span>`;
-  }).join(' ');
-}
-
-export function normalizeScenes(scenes) {
-  if (!Array.isArray(scenes) || !scenes.length) throw new Error('Give at least one scene.');
-  if (scenes.length > MAX_SCENES) throw new Error(`At most ${MAX_SCENES} scenes.`);
-  return scenes.map((s, i) => {
-    const duration = Number(s.duration || 4);
-    if (!(duration >= 0.5 && duration <= 30)) throw new Error(`Scene ${i + 1}: duration must be 0.5 to 30 seconds.`);
-    const effect = s.effect || (s.pillars ? 'pillars' : 'focus');
-    if (!EFFECTS.includes(effect)) throw new Error(`Scene ${i + 1}: effect must be one of ${EFFECTS.join(', ')}.`);
-    const pillars = Array.isArray(s.pillars) ? s.pillars.map(Number).filter((n) => n > 0).slice(0, 12) : [];
-    if (effect === 'pillars' && !pillars.length) throw new Error(`Scene ${i + 1}: pillars needs the measured bar heights from the real chart.`);
-    const captions = Array.isArray(s.captions) ? s.captions.map((c) => ({ at: Math.max(0, Number(c.at) || 0), text: noDashes(c.text).slice(0, 80) })) : [];
-    return {
-      kicker: noDashes(s.kicker).slice(0, 60),
-      headline: noDashes(s.headline).slice(0, 140),
-      highlight: s.highlight ? String(s.highlight) : '',
-      sub: noDashes(s.sub).slice(0, 220),
-      image: imageSrc(s.image),
-      label: noDashes(s.label || (pillars.length ? 'STYLIZED TRANSITION' : '')).slice(0, 40),
-      focus: s.focus ? { x: Number(s.focus.x ?? 50), y: Number(s.focus.y ?? 50), scale: Number(s.focus.scale ?? 1.6) } : null,
-      effect,
-      pillars,
-      captions,
-      duration,
-    };
-  });
-}
-
-function sceneHtml(s, i, start, brand, end) {
-  const parts = [];
-  if (s.kicker) parts.push(`<div class="kicker">${escapeHtml(s.kicker)}</div>`);
-  if (s.effect === 'endcard') {
-    parts.push('<div class="loader"><b></b><b></b><b></b></div>');
-    if (s.headline) parts.push(`<div class="headline">${headlineHtml(s.headline, s.highlight)}</div>`);
-    if (end.cta?.label) parts.push(`<div class="btn">${escapeHtml(noDashes(end.cta.label))}</div>`);
-    if (end.cta?.url) parts.push(`<div class="url">${escapeHtml(end.cta.url.replace(/^https?:\/\//, ''))}</div>`);
-    if (end.question) parts.push(`<div class="question">${escapeHtml(noDashes(end.question))}</div>`);
-  } else {
-    if (s.headline) parts.push(`<div class="headline">${headlineHtml(s.headline, s.highlight)}</div>`);
-    if (s.sub) parts.push(`<div class="sub">${escapeHtml(s.sub)}</div>`);
-    if (s.pillars.length) {
-      const max = Math.max(...s.pillars);
-      parts.push(`<div class="pillars">${s.pillars.map((h) => `<div class="pillar" style="height:${Math.round((h / max) * 100)}%"></div>`).join('')}${s.label ? `<div class="label">${escapeHtml(s.label)}</div>` : ''}</div>`);
-    } else if (s.image) {
-      parts.push(`<div class="shot"><img src="${escapeHtml(s.image)}" alt="" />${s.label ? `<div class="label">${escapeHtml(s.label)}</div>` : ''}</div>`);
-    }
-  }
-  const slats = s.effect === 'slats' ? `<div class="slats">${'<i></i>'.repeat(8)}</div>` : '';
-  const caps = s.captions.map((c, k) => {
-    const next = s.captions[k + 1]?.at ?? s.duration;
-    const dur = Math.max(0.2, next - c.at);
-    return `    <div class="clip caption" id="cap-${i}-${k}" data-start="${(start + c.at).toFixed(3)}" data-duration="${dur.toFixed(3)}" data-track-index="3">${escapeHtml(c.text)}</div>`;
-  });
-  return [`    <div class="scene" id="s${i}">${parts.join('')}${slats}</div>`, ...caps].join('\n');
-}
-
-export function composeHtml({ format = '9x16', brand, scenes, cta, question, audio }) {
-  const f = FORMATS[format];
-  if (!f) throw new Error('format must be 9x16 or 16x9.');
-  const kit = brand || normalizeBrand({});
-  const list = normalizeScenes(scenes);
-  const total = list.reduce((sum, s) => sum + s.duration, 0);
-  const vars = {
-    ...Object.fromEntries(Object.entries(kit.colors).map(([k, v]) => [`--${k}`, v])),
-    '--sans': `"${kit.fonts?.sans || 'Inter'}"`,
-    '--mono': `"${kit.fonts?.mono || 'Geist Mono'}"`,
-    '--u': `${f.u}px`,
-    '--hsize': f.hsize,
-    '--shotw': f.shotw,
-    '--capy': f.capy,
-  };
-  let at = 0;
-  const end = { cta: cta || kit.cta, question };
-  const html = list.map((s, i) => { const out = sceneHtml(s, i, at, kit, end); at += s.duration; return out; }).join('\n');
-  const audioTag = audio ? `  <audio id="vo" src="${escapeHtml(audio)}" data-start="0" data-duration="${total.toFixed(3)}" data-track-index="2"></audio>` : '';
-  const spec = JSON.stringify({ scenes: list.map(({ duration, effect, focus }) => ({ duration, effect, focus })) }).replace(/</g, '\\u003c');
-  const fill = {
-    W: String(f.w),
-    H: String(f.h),
-    DURATION: total.toFixed(3),
-    CSS_VARS: Object.entries(vars).map(([k, v]) => `${k}: ${v};`).join(' '),
-    SCENES_HTML: html,
-    AUDIO: audioTag,
-    SPEC_JSON: spec,
-  };
-  const out = STUDIO_FILES['templates/composition.html'].replace(/\{\{(\w+)\}\}/g, (m, key) => (Object.hasOwn(fill, key) ? fill[key] : m));
-  return { html: out, duration: Number(total.toFixed(3)), width: f.w, height: f.h, scenes: list };
+export function composeHtml(options) {
+  return composeWith(STUDIO_FILES['templates/composition.html'], { ...options, brand: options.brand || normalizeBrand({}) });
 }
 
 // ---------- Projects ----------

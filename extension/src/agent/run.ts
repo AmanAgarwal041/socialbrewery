@@ -1,11 +1,11 @@
-// One agent session: a conversation with Claude or Grok, working in one tab, step by step, until
+// One agent session: a conversation with Claude, Grok, or OpenAI, working in one tab, step by step, until
 // the model finishes its turn, the user stops it, or it runs out of steps.
 
 import { AgentTab } from './browser'
 import { PLAYBOOKS } from './playbooks'
 import { startConversation, type Conversation } from './providers'
 import { createExecutor, TOOLS, type ApprovalRequest } from './tools'
-import type { PostRecord, Run, Settings } from '../storage'
+import { missingKey, type PostRecord, type Run, type Settings } from '../storage'
 
 const MAX_STEPS = 80
 // Reads that would only clutter the run's step list.
@@ -17,7 +17,7 @@ How to work:
 - Start with read_page to see where you are. Use navigate to go to a site's posting page (starting points are below) and read_page after every navigation, click that opens something, or upload.
 - Prefer refs from read_page over click_point. Use screenshot when the layout is unclear or a click did not do what you expected.
 - Click an editor before typing into it, or pass its ref to type_text. Check with read_page that the text landed in the right box.
-- For media, use list_files and upload_file on the page's file input. Never click buttons that open the system file picker. Use generate_video only when the user wants a new clip.
+- For media, use list_files and upload_file on the page's file input. Never click buttons that open the system file picker. When the user wants a new video: make_motion_video (free, rendered in this browser: animated text, numbers, screenshots, end card; read get_motion_guide first, write a spoken narration line for every scene since videos have a voiceover by default, and check the contact sheet it returns) for explainers, launches, tips, and announcements; generate_video (Grok Imagine, needs an xAI key) only for realistic footage. Never invent numbers or screenshots for a motion video.
 - If the user is not signed in to a site, stop and ask them to sign in in that tab; never type passwords or codes.
 - Every click or key that publishes or sends asks the user to approve it in the side panel. That is expected: fill everything in first, then click the publish button once. If they decline, ask what to change. Never try to get around the approval.
 - After something is published, find its real link on the page and call record_post. Never invent links, view counts, or results.
@@ -67,6 +67,10 @@ function summarize(name: string, input: Record<string, unknown>) {
       return 'Upload a file'
     case 'generate_video':
       return 'Generate a clip with Grok'
+    case 'make_motion_video':
+      return `Render a ${Array.isArray(input.scenes) ? input.scenes.length : 0}-scene motion video`
+    case 'get_motion_guide':
+      return input.style ? `Read the ${input.style} motion style` : 'Read the motion guide'
     case 'record_post':
       return `Posted to ${input.network}`
     case 'read_page':
@@ -132,8 +136,8 @@ export class AgentSession {
   /** Uses the latest keys and models from Settings for the next message. */
   useSettings(settings: Settings) {
     if (settings.provider !== this.settings.provider) throw new Error('Start a new chat to switch models.')
-    if (settings.provider === 'claude' && !settings.anthropicKey) throw new Error('Add your Anthropic API key in Settings to use Claude.')
-    if (settings.provider === 'grok' && !settings.xaiKey) throw new Error('Add your xAI API key in Settings to use Grok.')
+    const missing = missingKey(settings)
+    if (missing) throw new Error(missing)
     this.settings = settings
     this.conversation.useSettings(settings)
   }

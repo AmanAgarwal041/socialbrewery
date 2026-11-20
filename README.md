@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Tell Grok what to make. It writes, films, and posts.</strong><br />
-  A posting studio for YouTube Shorts, LinkedIn, Instagram Reels, X, Hashnode, Slack, and Reddit, with a Grok or Claude agent and an MCP connector for your own agents.
+  A posting studio for YouTube Shorts, LinkedIn, Instagram Reels, X, Hashnode, Slack, and Reddit, with a Grok, Claude, or OpenAI agent and an MCP connector for your own agents.
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 ## Why Socialbrewery
 
-- **Brew with Grok or Claude.** Pick the assistant with the small tabs under the text box; switching relabels the page and sends your next message to that model. Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
+- **Brew with Grok, Claude, or OpenAI.** Pick the assistant with the small tabs under the text box; switching relabels the page and sends your next message to that model. Describe what you want ("an 8 second Short of steam rising from coffee, posted unlisted"). The agent writes the caption, generates a vertical 9:16 clip, and posts it, showing every step as it happens.
 - **Seven networks, one dashboard.** Each network has Overview, Posts, Compose, Analysis, and Connection tabs, so you can also post by hand.
 - **AI performance reviews.** YouTube Analysis shows channel stats and reviews each video with Grok, Claude, or OpenAI.
 - **Built for teams.** Organisations and roles (admin, member) via Clerk. Every organisation's keys and account tokens are encrypted with AES-256-GCM and never sent back to the browser.
@@ -69,12 +69,12 @@ Socialbrewery is a custom MCP server at `POST /mcp`. Each organisation has its o
 Tools include `generate_and_post_youtube_short`, `update_youtube_video`, `analyze_youtube_video`, `post_linkedin`, `post_instagram_reel`, `post_x`, `reply_x`, `publish_hashnode_article`, `post_slack`, `reddit_subreddit_rules`, `post_reddit`, `search_reddit`, `save_reddit_leads`, and more. See [Ask Grok on grok.com](#ask-grok-on-grokcom) for running the connector on your own server.
 
 
-## Video Studio (make videos from Claude or Grok)
+## Video Studio (make videos from Claude, Grok, or OpenAI)
 
 The connector also carries a Video Studio: brand kits, a style guide, motion styles (cinematic, graph to 3D pillars,
-prompt-motion effects, product launch, brag-style storytelling, pastel explainer), agent playbooks, HyperFrames + GSAP
+prompt-motion effects, product launch, brag-style storytelling, pastel explainer, kinetic typography, soft pop), agent playbooks, HyperFrames + GSAP
 templates, ElevenLabs or Kokoro voiceovers, and an MP4 renderer that drops the video into the media library for the
-posting tools. Full guide: [docs/video-studio.md](docs/video-studio.md).
+posting tools. The Chrome extension renders the same compositions for free in your browser (`make_motion_video`, no video API or key), with a voiceover by default: your own cloned voice, an xAI/OpenAI/ElevenLabs voice, or a free open voice (Supertonic) that runs on your computer. Full guide: [docs/video-studio.md](docs/video-studio.md).
 
 1. Connect the connector as above. In **Claude Desktop / claude.ai** add the Claude URL as a custom connector; in
    **Claude Code** run `claude mcp add --transport http socialbrewery "<Claude URL>"`; in **Grok** add the Grok URL on grok.com/connectors.
@@ -213,7 +213,7 @@ The UI is a React + [shadcn/ui](https://ui.shadcn.com) dashboard. Its source is 
 
 - **Landing page**: signed-out visitors at `/` see the landing page (`web/src/pages/landing.tsx`, screenshots in `web/public/landing/`). `/overview` and every other page open the dashboard in a read-only exploring mode. Signed in, `/` is the Overview.
 - **Overview**: post counts, connector status, setup checklist, and a quick prompt into Brew.
-- **Brew**: chat with Grok or Claude (Settings → AI models → Assistant). Clips are always generated with Grok Imagine. Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
+- **Brew**: chat with Grok, Claude, or OpenAI (Settings → AI models → Assistant). Any of them can make clips, which are always generated with Grok Imagine (needs the xAI key). Pick a target network, attach or drop a video, watch each step (clip generated, uploaded, posted) as it happens, and stop a run.
 - **Connectors → YouTube / LinkedIn / Instagram / X / Hashnode / Slack / Reddit**: each has Overview, Posts, Compose, Analysis, and Connection tabs. YouTube posts can be edited, LinkedIn posts can get a comment, X posts can get a reply, Hashnode Analysis shows article views, reactions, and comments, Slack posts get thread replies and show reactions, Reddit posts can get a comment and Analysis shows score, comments, upvote ratio, and removals, and YouTube Analysis shows channel stats with AI reviews.
 - **Connectors → Grok connector / Claude connector**: the connector URL and tools, with setup steps for grok.com, claude.ai, Claude Desktop, and Claude Code.
 - **Chrome extension**: download the extension (`extension/`, packaged by `npm run ext:package` into `web/public/downloads/`). It posts from the user's own tabs with their own Anthropic or xAI key, asks before anything is published, and signing in only saves runs.

@@ -1269,7 +1269,7 @@ export async function applyResendEvent(event) {
   return recipients.length;
 }
 
-// ---------- drafting with Grok or Claude ----------
+// ---------- drafting with Grok, Claude, or OpenAI ----------
 
 export const DRAFT_SYSTEM = `You write marketing and outreach emails for a small team.
 Return only JSON: {"subject": "...", "body": "..."}.

@@ -115,13 +115,13 @@ const GROUPS: Group[] = [
   },
   {
     id: "openai",
-    title: "Reviews and OpenAI",
+    title: "OpenAI",
     description:
-      "Who writes performance reviews, and the OpenAI key if that is OpenAI.",
+      "Used when the assistant or the reviews are set to OpenAI, and picks who writes performance reviews.",
     icon: Bot,
     tone: "bg-p3-soft text-p3-ink",
     keys: ["ANALYSIS_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL"],
-    required: [],
+    required: [["OPENAI_API_KEY"]],
   },
   {
     id: "elevenlabs",
@@ -387,9 +387,7 @@ function Field({
           <SelectContent>
             <SelectItem value="grok">Grok</SelectItem>
             <SelectItem value="claude">Claude</SelectItem>
-            {field.key === "ANALYSIS_PROVIDER" && (
-              <SelectItem value="openai">OpenAI</SelectItem>
-            )}
+            <SelectItem value="openai">OpenAI</SelectItem>
           </SelectContent>
         </Select>
       ) : (

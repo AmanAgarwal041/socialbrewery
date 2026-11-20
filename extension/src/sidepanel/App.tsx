@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, CircleStop, Clapperboard, Download, ExternalLink, History, KeyRound, Loader2, Paperclip, Plus, Search, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Video, X } from 'lucide-react'
+import { ArrowUp, Check, CircleStop, Clapperboard, Download, ExternalLink, History, KeyRound, Loader2, Mic, Paperclip, Play, Plus, Search, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Video, X } from 'lucide-react'
 import { AgentSession } from '@/agent/run'
 import { CLAUDE_MODELS } from '@/agent/providers'
 import type { ApprovalRequest } from '@/agent/tools'
 import { syncLeads, syncRuns } from '@/sync'
 import { Markdown } from './markdown'
-import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
+import { cloneXaiVoice, OPENAI_VOICES, pickVoice, speakLines, SUPERTONIC_VOICES, VOICE_PROVIDERS, XAI_VOICES } from '@/agent/voice'
+import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, missingKey, PROVIDERS, providerInfo, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Run, type Settings, type Step } from '@/storage'
 import { useAccount } from './account'
 import { PostVideoView, videoPrompt } from './post-video'
 import { Button, cn, Field, inputClass } from './ui'
@@ -53,6 +54,154 @@ function StepView({ step }: { step: Step }) {
 
 // ---------- settings ----------
 
+const SAMPLE_LINE = 'Hi! This is the voice your videos will use. Sounds good?'
+
+function VoiceSettings({ settings, set }: { settings: Settings; set: <K extends keyof Settings>(key: K, value: Settings[K]) => void }) {
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sample, setSample] = useState<File | null>(null)
+  const [cloneName, setCloneName] = useState('My voice')
+  const [consent, setConsent] = useState(false)
+  let using = ''
+  try {
+    using = pickVoice(settings).label
+  } catch (err) {
+    using = err instanceof Error ? err.message : String(err)
+  }
+
+  const test = async () => {
+    setBusy(true)
+    setStatus('')
+    try {
+      const { clips, voice, note } = await speakLines([SAMPLE_LINE], settings, settings.voiceSpeed || 1, new AbortController().signal, setStatus)
+      const ctx = new AudioContext()
+      const src = ctx.createBufferSource()
+      src.buffer = clips[0]
+      src.connect(ctx.destination)
+      src.onended = () => ctx.close()
+      src.start()
+      setStatus(`Playing the ${voice.label}.${note ? ` ${note}` : ''}`)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clone = async () => {
+    if (!sample || !consent) return
+    setBusy(true)
+    setStatus('Creating your voice with xAI…')
+    try {
+      const id = await cloneXaiVoice(settings.xaiKey, sample, cloneName.trim())
+      set('xaiVoice', id)
+      setStatus(`Created voice ${id}. Videos now use it whenever the xAI voice is picked.`)
+      setSample(null)
+      setConsent(false)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const p = settings.voiceProvider
+  const show = (id: string) => p === id || p === 'auto'
+  return (
+    <section className="space-y-3">
+      <h2 className="flex items-center gap-1.5 font-semibold">
+        <Mic className="size-4" /> Voiceover
+      </h2>
+      <p className="text-xs text-muted-foreground">Every motion video gets a voiceover. With no keys, a free open voice (Supertonic) runs on this computer: it downloads about 400 MB once.</p>
+      <Field label="Voice" hint={`Videos use: ${using}`}>
+        <select className={inputClass} value={p} onChange={(e) => set('voiceProvider', e.target.value as Settings['voiceProvider'])}>
+          {VOICE_PROVIDERS.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        {show('supertonic') && (
+          <Field label="Free voice">
+            <select className={inputClass} value={settings.supertonicVoice} onChange={(e) => set('supertonicVoice', e.target.value)}>
+              {SUPERTONIC_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {show('openai') && (
+          <Field label="OpenAI voice">
+            <select className={inputClass} value={settings.openaiVoice} onChange={(e) => set('openaiVoice', e.target.value)}>
+              {OPENAI_VOICES.map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {show('xai') && (
+          <Field label="xAI voice" hint="A built-in voice, or your clone's id.">
+            <input className={inputClass} list="xai-voices" value={settings.xaiVoice} onChange={(e) => set('xaiVoice', e.target.value.trim())} />
+            <datalist id="xai-voices">
+              {XAI_VOICES.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+          </Field>
+        )}
+        <Field label="Speed">
+          <input className={inputClass} type="number" min={0.7} max={1.5} step={0.05} value={settings.voiceSpeed} onChange={(e) => set('voiceSpeed', Number(e.target.value) || 1)} />
+        </Field>
+        <Field label="Language" hint="en, es, hi, de, fr…">
+          <input className={inputClass} value={settings.voiceLanguage} onChange={(e) => set('voiceLanguage', e.target.value.trim().toLowerCase())} />
+        </Field>
+      </div>
+      {show('openai') && (
+        <Field label="How the OpenAI voice should sound">
+          <textarea className={cn(inputClass, 'min-h-14')} value={settings.voiceStyle} onChange={(e) => set('voiceStyle', e.target.value)} />
+        </Field>
+      )}
+      {show('elevenlabs') && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="ElevenLabs API key">
+            <input className={inputClass} type="password" autoComplete="off" value={settings.elevenlabsKey} onChange={(e) => set('elevenlabsKey', e.target.value.trim())} placeholder="sk_…" />
+          </Field>
+          <Field label="ElevenLabs voice id" hint="Your clone from elevenlabs.io → Voices.">
+            <input className={inputClass} value={settings.elevenlabsVoiceId} onChange={(e) => set('elevenlabsVoiceId', e.target.value.trim())} />
+          </Field>
+        </div>
+      )}
+      {(p === 'xai' || p === 'auto') && settings.xaiKey && (
+        <details className="rounded-lg border border-border bg-card p-2.5 text-xs">
+          <summary className="cursor-pointer font-medium">Clone your voice with xAI</summary>
+          <div className="mt-2 space-y-2">
+            <p className="text-muted-foreground">Upload up to 120 seconds of clear speech. The sample goes to xAI with your xAI key, and the new voice id is saved here.</p>
+            <input type="file" accept="audio/*" onChange={(e) => setSample(e.target.files?.[0] || null)} className="block w-full text-xs" />
+            <input className={inputClass} value={cloneName} onChange={(e) => setCloneName(e.target.value)} placeholder="Voice name" />
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
+              <span>This is my own voice, or I have the speaker’s permission to clone it.</span>
+            </label>
+            <Button variant="outline" disabled={!sample || !consent || busy} onClick={clone}>
+              <Mic /> Create voice
+            </Button>
+          </div>
+        </details>
+      )}
+      <div className="flex items-center gap-2">
+        <Button variant="outline" disabled={busy} onClick={test}>
+          {busy ? <Loader2 className="animate-spin" /> : <Play />} Test the voice
+        </Button>
+        {status && <span className="min-w-0 text-[11px] text-muted-foreground">{status}</span>}
+      </div>
+    </section>
+  )
+}
+
 function SettingsView({ settings, onChange }: { settings: Settings; onChange: (next: Settings) => void }) {
   const account = useAccount()
   const [files, setFiles] = useState<MediaFile[]>([])
@@ -68,12 +217,15 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (n
         <h2 className="flex items-center gap-1.5 font-semibold">
           <KeyRound className="size-4" /> Your API keys
         </h2>
-        <p className="text-xs text-muted-foreground">Kept only in this browser and sent only to Anthropic or xAI. Signing in never uploads them.</p>
+        <p className="text-xs text-muted-foreground">Kept only in this browser and sent only to Anthropic, xAI, OpenAI, or ElevenLabs. Signing in never uploads them.</p>
         <Field label="Anthropic API key (Claude)" hint="From console.anthropic.com → API keys.">
           <input className={inputClass} type="password" autoComplete="off" value={settings.anthropicKey} onChange={(e) => set('anthropicKey', e.target.value.trim())} placeholder="sk-ant-…" />
         </Field>
-        <Field label="xAI API key (Grok)" hint="From console.x.ai. Also needed to generate video clips.">
+        <Field label="xAI API key (Grok)" hint="From console.x.ai. Video clips always use Grok Imagine, so this is needed for clips whichever assistant you chat with.">
           <input className={inputClass} type="password" autoComplete="off" value={settings.xaiKey} onChange={(e) => set('xaiKey', e.target.value.trim())} placeholder="xai-…" />
+        </Field>
+        <Field label="OpenAI API key" hint="From platform.openai.com → API keys.">
+          <input className={inputClass} type="password" autoComplete="off" value={settings.openaiKey} onChange={(e) => set('openaiKey', e.target.value.trim())} placeholder="sk-…" />
         </Field>
       </section>
 
@@ -102,8 +254,13 @@ function SettingsView({ settings, onChange }: { settings: Settings; onChange: (n
           <Field label="Grok video model">
             <input className={inputClass} value={settings.grokVideoModel} onChange={(e) => set('grokVideoModel', e.target.value.trim())} />
           </Field>
+          <Field label="OpenAI model">
+            <input className={inputClass} value={settings.openaiModel} onChange={(e) => set('openaiModel', e.target.value.trim())} />
+          </Field>
         </div>
       </section>
+
+      <VoiceSettings settings={settings} set={set} />
 
       <section className="space-y-3">
         <h2 className="font-semibold">Saving your progress</h2>
@@ -164,7 +321,7 @@ function HistoryView({ onOpen, onChanged }: { onOpen: (run: Run) => void; onChan
           <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(run)}>
             <p className="truncate font-medium">{run.title || 'Untitled'}</p>
             <p className="text-xs text-muted-foreground">
-              {new Date(run.updatedAt).toLocaleString()} · {run.provider === 'claude' ? 'Claude' : 'Grok'}
+              {new Date(run.updatedAt).toLocaleString()} · {providerInfo(run.provider).label}
               {run.posts.length ? ` · ${run.posts.length} posted` : ''}
             </p>
           </button>
@@ -300,7 +457,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
   const fileInput = useRef<HTMLInputElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
 
-  const keyMissing = settings.provider === 'claude' ? !settings.anthropicKey : !settings.xaiKey
+  const keyMissing = Boolean(missingKey(settings))
 
   const update = useCallback((fn: (r: Run) => Run) => {
     if (!runRef.current) return
@@ -424,7 +581,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         <span className="font-semibold">Socialbrewery</span>
         <div className="ml-auto flex items-center gap-1">
           <div className="flex rounded-lg border border-border p-0.5" role="group" aria-label="Model">
-            {(['claude', 'grok'] as Provider[]).map((p) => (
+            {PROVIDERS.map(({ id: p, label }) => (
               <button
                 key={p}
                 disabled={running}
@@ -434,7 +591,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                 }}
                 className={cn('rounded-md px-2 py-0.5 text-xs font-medium', settings.provider === p ? 'bg-p1 text-ink' : 'text-muted-foreground')}
               >
-                {p === 'claude' ? 'Claude' : 'Grok'}
+                {label}
               </button>
             ))}
           </div>
@@ -516,7 +673,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
           <div className="space-y-2 p-3">
             {!run && (
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-                <p className="font-medium">Tell {settings.provider === 'claude' ? 'Claude' : 'Grok'} what to post, or who to find.</p>
+                <p className="font-medium">Tell {providerInfo(settings.provider).label} what to post, or who to find.</p>
                 <p className="text-muted-foreground">
                   It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode. It fills everything in, then waits for you to approve before anything is published. It can also search Reddit for people who need what you make and keep them under Leads.
                 </p>
@@ -530,7 +687,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                 </ul>
                 {keyMissing && (
                   <Button variant="outline" onClick={() => setView('settings')}>
-                    <KeyRound /> Add your {settings.provider === 'claude' ? 'Anthropic' : 'xAI'} key
+                    <KeyRound /> Add your {providerInfo(settings.provider).keyName} key
                   </Button>
                 )}
               </div>

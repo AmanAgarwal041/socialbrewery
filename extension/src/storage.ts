@@ -2,16 +2,51 @@
 // never synced anywhere), runs, and attached or generated media (IndexedDB). Signing in only copies
 // runs to Socialbrewery (src/sync.ts); keys and media stay here.
 
-export type Provider = 'claude' | 'grok'
+export type Provider = 'claude' | 'grok' | 'openai'
+export type VoiceProvider = 'auto' | 'supertonic' | 'xai' | 'openai' | 'elevenlabs'
+
+/** The assistants, with the key each one needs. */
+export const PROVIDERS: { id: Provider; label: string; keyName: string; keyField: 'anthropicKey' | 'xaiKey' | 'openaiKey' }[] = [
+  { id: 'claude', label: 'Claude', keyName: 'Anthropic', keyField: 'anthropicKey' },
+  { id: 'grok', label: 'Grok', keyName: 'xAI', keyField: 'xaiKey' },
+  { id: 'openai', label: 'OpenAI', keyName: 'OpenAI', keyField: 'openaiKey' },
+]
+
+export function providerInfo(provider: Provider) {
+  return PROVIDERS.find((p) => p.id === provider) || PROVIDERS[0]
+}
+
+/** The message shown when the selected assistant has no key yet. */
+export function missingKey(settings: Settings) {
+  const info = providerInfo(settings.provider)
+  return settings[info.keyField] ? '' : `Add your ${info.keyName} API key in Settings to use ${info.label}.`
+}
 
 export type Settings = {
   provider: Provider
   anthropicKey: string
   xaiKey: string
+  openaiKey: string
   claudeModel: string
   claudeEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   grokModel: string
   grokVideoModel: string
+  openaiModel: string
+  /** Voiceover for make_motion_video (src/agent/voice.ts). */
+  voiceProvider: VoiceProvider
+  supertonicVoice: string
+  /** A built-in xAI voice, or the id of a voice cloned with the xAI key. */
+  xaiVoice: string
+  openaiVoice: string
+  /** How OpenAI voices should sound (gpt-4o-mini-tts instructions). */
+  voiceStyle: string
+  elevenlabsKey: string
+  /** An ElevenLabs voice: your own clone or any library voice. */
+  elevenlabsVoiceId: string
+  elevenlabsModel: string
+  voiceSpeed: number
+  /** BCP-47 language of the narration, e.g. en, es, hi. */
+  voiceLanguage: string
   /** The Socialbrewery app this extension signs in to and saves to. */
   serverUrl: string
 }
@@ -20,10 +55,22 @@ export const DEFAULT_SETTINGS: Settings = {
   provider: 'claude',
   anthropicKey: '',
   xaiKey: '',
+  openaiKey: '',
   claudeModel: 'claude-opus-5-5',
   claudeEffort: 'medium',
   grokModel: 'grok-4.6',
   grokVideoModel: 'grok-imagine-video-1.5',
+  openaiModel: 'gpt-5.6-terra',
+  voiceProvider: 'auto',
+  supertonicVoice: 'F1',
+  xaiVoice: 'eve',
+  openaiVoice: 'marin',
+  voiceStyle: 'A warm, natural narrator for a short social video: conversational and confident, never salesy, with natural pauses between ideas.',
+  elevenlabsKey: '',
+  elevenlabsVoiceId: '',
+  elevenlabsModel: 'eleven_multilingual_v2',
+  voiceSpeed: 1.05,
+  voiceLanguage: 'en',
   serverUrl: 'https://socialbrewery.agarwal-aman041.workers.dev',
 }
 
@@ -158,7 +205,7 @@ export async function removeLeads(keys: string[]) {
 
 // ---------- media ----------
 
-export type MediaFile = { id: string; name: string; mime: string; size: number; source: 'upload' | 'grok'; createdAt: number }
+export type MediaFile = { id: string; name: string; mime: string; size: number; source: 'upload' | 'grok' | 'render'; createdAt: number }
 
 function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

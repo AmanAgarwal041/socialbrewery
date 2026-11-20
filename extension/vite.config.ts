@@ -8,6 +8,8 @@ import { defineConfig } from 'vite'
 // functions (chrome.scripting), so there is no content-script bundle.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The voice worker (src/agent/supertonic.worker.ts) runs ONNX Runtime, which needs an ES module worker.
+  worker: { format: 'es' },
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
   build: {
     outDir: 'dist',

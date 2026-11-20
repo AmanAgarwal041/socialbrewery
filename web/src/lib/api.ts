@@ -15,10 +15,10 @@ export type Health = {
   ok: boolean
   bootId: string
   /** Brew's assistant, chosen in Settings, and whether its API key is set. */
-  agent?: 'grok' | 'claude'
+  agent?: 'grok' | 'claude' | 'openai'
   agentReady?: boolean
-  /** Whether each assistant's API key is set (drives the Grok/Claude tabs). */
-  agents?: { grok: boolean; claude: boolean }
+  /** Whether each assistant's API key is set (drives the Grok/Claude/OpenAI tabs). */
+  agents?: { grok: boolean; claude: boolean; openai?: boolean }
   maxUploadMb?: number
   xai: boolean
   youtubeApp: boolean
@@ -324,7 +324,7 @@ const GUEST_READS: Record<string, unknown> = {
 }
 
 export function agentLabel(health?: Health | null) {
-  return health?.agent === 'claude' ? 'Claude' : 'Grok'
+  return ({ claude: 'Claude', openai: 'OpenAI' } as Record<string, string>)[health?.agent || ''] || 'Grok'
 }
 
 export function guestHealth(): Health {
@@ -333,7 +333,7 @@ export function guestHealth(): Health {
     bootId: 'guest',
     agent: 'grok',
     agentReady: false,
-    agents: { grok: false, claude: false },
+    agents: { grok: false, claude: false, openai: false },
     maxUploadMb: 25,
     xai: false,
     youtubeApp: false,

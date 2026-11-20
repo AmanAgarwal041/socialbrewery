@@ -1,6 +1,6 @@
 # Video Studio
 
-Video Studio lets Claude or Grok make launch videos, product Shorts, and promos through the Socialbrewery
+Video Studio lets Claude, Grok, or OpenAI make launch videos, product Shorts, and promos through the Socialbrewery
 connector, in a consistent brand style, and hand the MP4 straight to the posting tools.
 
 It has two parts:
@@ -28,13 +28,29 @@ Clients that do not show MCP prompts or resources (Grok today) get the same cont
 4. `generate_voiceover { text, brand, speed }` returns `voiceoverId` and its duration.
 5. `create_video_project { template, formats, brand, scenes[], cta, question, voiceoverId }`.
    Scene fields: `kicker`, `headline`, `highlight`, `sub`, `image`, `focus {x,y,scale}`, `label`, `captions[{at,text}]`,
-   `duration`, `effect` (`focus`, `zoom-through`, `rack`, `hinge`, `slats`, `shutter`, `pillars`, `endcard`), `pillars` (measured bar heights).
+   `duration`, `effect` (`focus`, `zoom-through`, `rack`, `hinge`, `slats`, `shutter`, `pillars`, `endcard`, `pop`, `kinetic`, `split`, `wipe`, `counter`), `pillars` (measured bar heights), `stat {value, prefix, suffix, decimals}` (a real number for `counter`).
 6. `render_video { projectId, format }` then poll `get_render_status { jobId }` until `done`. You get a `mediaId`.
 7. Post with `post_youtube_short { mediaId }`, then `post_linkedin { linkUrl: <YouTube URL> }`, `post_slack`, and so on,
    only after the user approves each post.
 
 Em and en dashes in on-screen text are replaced automatically. Pillars require real measured heights and get a
 "STYLIZED TRANSITION" label. Broken image URLs stop the render with a clear error instead of rendering blank.
+
+## Free rendering
+
+Compositions are HTML + GSAP, so rendering needs only Chrome. There are three free ways (also in `studio/guides/rendering.md`):
+
+1. **Chrome extension.** `make_motion_video` composes the scenes with `src/studio-compose.js` (the same code the server uses), opens a render tab, seeks the GSAP timeline frame by frame over the DevTools Protocol, screenshots each frame, and encodes an H.264 MP4 with WebCodecs ([Mediabunny](https://mediabunny.dev), MPL-2.0). GSAP and the fonts are inlined, so it needs no server, no key, and no video API, and it works with Claude, Grok, or OpenAI. A 16 s vertical video takes about a minute. Every video has a voiceover by default (below); images are https URLs or `file:<id>` of an attached image. It returns a four-frame contact sheet so the agent can check its work.
+   **Voiceover.** Each scene takes a `narration` line (default: its headline and sub; `""` keeps it silent, `voiceover: false` makes a silent video). Scenes stretch to fit their line, the lines are mixed into one track, and the MP4 gets AAC audio (Opus where Chrome has no AAC encoder). Settings → Voiceover picks the voice; **Automatic** uses the first that is set up:
+   - **ElevenLabs** with your key and a voice id: your own clone (made on elevenlabs.io) or any library voice.
+   - **xAI** (`/v1/tts`) with the xAI key: a built-in voice (`eve` by default) or a clone. **Clone your voice with xAI** uploads up to 120 s of your own speech (`/v1/custom-voices`, with a consent check) and saves the new voice id.
+   - **OpenAI** (`gpt-4o-mini-tts`, voice `marin` by default) with the OpenAI key, steered by an editable "how it should sound" instruction.
+   - **Free: Supertonic 3** (code MIT, model OpenRAIL-M), run on your computer with ONNX Runtime Web (WebGPU, else WebAssembly). About 400 MB downloads once from Hugging Face at a pinned revision and stays in the browser cache. It reads plain text with no phonemizer. Kokoro was not used here because its browser phonemizer bundles espeak-ng (GPL-3.0).
+   If a paid voice fails in Automatic, the free voice is used and the agent is told. Keys stay in the browser and go only to that provider. **Test the voice** in Settings plays a sample (and downloads the free voice ahead of time).
+2. **Node server.** `render_video` below (HyperFrames, Apache 2.0, plus ffmpeg), with voiceover audio.
+3. **Any machine or free CI runner** with Node 22+ and ffmpeg: save the composition from `get_video_project`, put `studio/fonts/` next to it as `fonts/`, and run `npx hyperframes@0.8.79 render`.
+
+Motion styles for these effects: `kinetic-typography` (kinetic, split, counter, wipe) and `soft-pop` (pop, a clay-like squash-in on warm colors).
 
 ## Requirements
 

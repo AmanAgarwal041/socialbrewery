@@ -109,7 +109,7 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal(signedIn.agent, 'grok');
     assert.equal(signedIn.agentReady, true);
     // Per-assistant readiness drives the Grok/Claude tabs under Brew's text area.
-    assert.deepEqual(signedIn.agents, { grok: true, claude: false });
+    assert.deepEqual(signedIn.agents, { grok: true, claude: false, openai: false });
 
     // A message can pick its assistant; unknown ones are refused before anything runs.
     const badProvider = await fetch(`${base}/api/agent/message`, as(adminToken, {

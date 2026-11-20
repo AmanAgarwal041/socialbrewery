@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { claudeChat } from './claude.js';
 import { generateShort, grokChat } from './grok.js';
 import { analyzeVideo } from './analysis.js';
+import { openaiChat } from './openai.js';
 import { listChannelVideos, publishShort, updateVideo } from './youtube.js';
 import { commentOnLinkedIn, postToHashnode, postToLinkedIn, postToSlack, postToX, replyOnSlack, replyOnX, postToReddit, commentOnReddit, redditRules } from './actions.js';
 import { listHashnodePosts } from './hashnode.js';
@@ -406,41 +407,55 @@ function assistantMessage(message) {
   return next;
 }
 
-// Brew runs on the organisation's chosen assistant unless a message picks one (the Grok/Claude
-// tabs under Brew's text area). Video generation always uses Grok Imagine.
-export const AGENT_PROVIDERS = ['grok', 'claude'];
+// Brew runs on the organisation's chosen assistant unless a message picks one (the Grok/Claude/OpenAI
+// tabs under Brew's text area). Every assistant can generate clips, which always use Grok Imagine
+// (neither Anthropic nor OpenAI offers a video API), so clips need the xAI key.
+export const AGENT_PROVIDERS = ['grok', 'claude', 'openai'];
+
+const AGENTS = {
+  grok: { name: 'Grok', keyName: 'xAI', key: () => cfg.XAI_API_KEY },
+  claude: { name: 'Claude', keyName: 'Anthropic', key: () => cfg.ANTHROPIC_API_KEY },
+  openai: { name: 'OpenAI', keyName: 'OpenAI', key: () => cfg.OPENAI_API_KEY },
+};
 
 export function agentProvider(requested) {
   if (AGENT_PROVIDERS.includes(requested)) return requested;
-  return cfg.AGENT_PROVIDER === 'claude' ? 'claude' : 'grok';
+  return AGENT_PROVIDERS.includes(cfg.AGENT_PROVIDER) ? cfg.AGENT_PROVIDER : 'grok';
 }
 
 export function agentName(provider = agentProvider()) {
-  return provider === 'claude' ? 'Claude' : 'Grok';
+  return AGENTS[provider]?.name || 'Grok';
 }
 
 /** Whether each assistant has its API key, so the tabs can say which one is ready. */
 export function agentsReady() {
-  return { grok: Boolean(cfg.XAI_API_KEY), claude: Boolean(cfg.ANTHROPIC_API_KEY) };
+  return Object.fromEntries(AGENT_PROVIDERS.map((id) => [id, Boolean(AGENTS[id].key())]));
+}
+
+/** The error to show when an assistant has no key, or '' when it is ready. */
+export function agentKeyMissing(provider) {
+  const agent = AGENTS[provider];
+  return agent.key() ? '' : `Add your ${agent.keyName} API key in Settings (an organisation admin can do this) to use ${agent.name}.`;
+}
+
+/** One chat turn with the given assistant. Messages are Brew's OpenAI-shaped history. */
+export function agentChat(provider, { messages, tools }) {
+  if (provider === 'claude') return claudeChat({ messages, tools });
+  // Grok and OpenAI get the plain OpenAI shape; Claude's extra field stays out of their requests.
+  const plain = messages.map(({ _claude, ...rest }) => rest);
+  if (provider !== 'openai') return grokChat({ messages: plain, tools });
+  // OpenAI's tool messages take only role, tool_call_id, and content.
+  return openaiChat({ messages: plain.map((m) => (m.role === 'tool' ? { role: 'tool', tool_call_id: m.tool_call_id, content: m.content } : m)), tools });
 }
 
 function systemPrompt(provider) {
   return SYSTEM_TEMPLATE.replace('{{NAME}}', agentName(provider));
 }
 
-// Grok gets the plain OpenAI shape; Claude's extra field stays out of its requests.
-function forGrok(messages) {
-  return messages.map(({ _claude, ...rest }) => rest);
-}
-
 export async function runAgent({ text, mediaId, privacyStatus, madeForKids, provider: requested, send, signal }) {
   const provider = agentProvider(requested);
-  if (provider === 'claude' && !cfg.ANTHROPIC_API_KEY) {
-    throw new Error('Add your Anthropic API key in Settings (an organisation admin can do this), or switch the assistant to Grok.');
-  }
-  if (provider === 'grok' && !cfg.XAI_API_KEY) {
-    throw new Error('Add your xAI API key in Settings (an organisation admin can do this).');
-  }
+  const missing = agentKeyMissing(provider);
+  if (missing) throw new Error(missing);
   const spoken = String(text || '').trim() || (mediaId ? 'Post the attached video as a YouTube Short.' : '');
   if (!spoken) throw new Error('Write a message or attach a video.');
 
@@ -475,7 +490,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
     if (signal?.aborted) throw new Error('Stopped.');
     send('status', { text: step === 0 ? `${agentName(provider)} is thinking…` : `${agentName(provider)} is continuing…` });
     const messages = [{ role: 'system', content: systemPrompt(provider) }, ...history.model];
-    const message = provider === 'claude' ? await claudeChat({ messages, tools: TOOLS }) : await grokChat({ messages: forGrok(messages), tools: TOOLS });
+    const message = await agentChat(provider, { messages, tools: TOOLS });
     history.model.push(assistantMessage(message));
     if (message.content) {
       const item = {

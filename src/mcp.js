@@ -30,7 +30,6 @@ import { REDDIT_SKILLS, redditSkill } from './reddit-skills.js';
 import {
   addStudioAsset,
   createVideoProject,
-  EFFECTS,
   generateVoiceover,
   getRenderStatus,
   getVideoPlaybook,
@@ -43,6 +42,7 @@ import {
   TEMPLATES,
   updateVideoProject,
 } from './studio.js';
+import { SCENE_SCHEMA } from './studio-compose.js';
 
 const HASHNODE_ARTICLE = {
   title: { type: 'string', description: 'Article title, at least 6 characters.' },
@@ -410,23 +410,7 @@ export const MCP_TOOLS = [
 ];
 
 // Each organisation has its own connector token; the token alone decides which organisation a call runs in.
-const STUDIO_SCENE = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    kicker: { type: 'string', description: 'Small mono label above the headline.' },
-    headline: { type: 'string', description: 'On-screen headline, max about 8 words. No em dashes.' },
-    highlight: { type: 'string', description: 'One word of the headline to color with the accent.' },
-    sub: { type: 'string' },
-    image: { type: 'string', description: 'REAL screenshot: https URL, data:image URI, or assets/<file> from add_studio_asset.' },
-    label: { type: 'string', description: 'Corner label, e.g. "STYLIZED TRANSITION" for anything illustrative.' },
-    focus: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, scale: { type: 'number' } }, description: 'Zoom target in % of the screenshot and the zoom scale.' },
-    effect: { type: 'string', enum: EFFECTS, description: 'Entry effect. zoom-through/shutter also style the exit of the previous scene. endcard shows loader, CTA, and question.' },
-    pillars: { type: 'array', items: { type: 'number' }, description: 'For effect "pillars": measured bar heights from the real chart.' },
-    captions: { type: 'array', items: { type: 'object', properties: { at: { type: 'number' }, text: { type: 'string' } } }, description: 'Burned-in caption chunks, seconds from scene start.' },
-    duration: { type: 'number', description: 'Seconds. Match the voiceover line length.' },
-  },
-};
+const STUDIO_SCENE = SCENE_SCHEMA;
 
 const STUDIO_PROJECT = {
   title: { type: 'string' },
