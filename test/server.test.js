@@ -306,6 +306,23 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
       body: 'hello',
     }));
     assert.equal(media.status, 400);
+    const clip = Buffer.from('00000018667479706d703432', 'hex');
+    const uploaded = await fetch(`${base}/api/media`, as(memberToken, {
+      method: 'POST',
+      headers: { 'Content-Type': 'video/mp4', 'X-Filename': encodeURIComponent('launch cut.mp4') },
+      body: clip,
+    }));
+    assert.equal(uploaded.status, 201);
+    const { media: libraryClip } = await uploaded.json();
+    const library = await fetch(`${base}/api/media`, as(memberToken)).then((res) => res.json());
+    assert.equal(library.media[0].id, libraryClip.id);
+    assert.equal(library.media[0].name, 'launch cut.mp4');
+    assert.equal(library.media[0].file, undefined);
+    const otherLibrary = await fetch(`${base}/api/media`, as(sessionToken({ sub: "user_ada", o: { id: "org_other", rol: "admin" }, azp: base }))).then((res) => res.json());
+    assert.ok(!otherLibrary.media.some((item) => item.id === libraryClip.id));
+    const served = await fetch(`${base}/api/media/${libraryClip.id}`, as(memberToken));
+    assert.equal(served.status, 200);
+    assert.deepEqual(Buffer.from(await served.arrayBuffer()), clip);
     assert.equal((await fetch(`${base}/public/media/${org.id}/00000000-0000-0000-0000-000000000000?exp=9999999999&sig=x`)).status, 403);
 
     const hook = `${base}/webhooks/instagram/${org.id}`;

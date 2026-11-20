@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowUp, Check, CircleStop, Clapperboard, Download, ExternalLink, History, KeyRound, Loader2, Paperclip, Plus, Search, Settings as SettingsIcon, ShieldCheck, Trash2, Users, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUp, Check, CircleStop, Clapperboard, Download, ExternalLink, History, KeyRound, Loader2, Paperclip, Plus, Search, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Video, X } from 'lucide-react'
 import { AgentSession } from '@/agent/run'
 import { CLAUDE_MODELS } from '@/agent/providers'
 import type { ApprovalRequest } from '@/agent/tools'
@@ -7,43 +7,11 @@ import { syncLeads, syncRuns } from '@/sync'
 import { Markdown } from './markdown'
 import { addFile, deleteRun, LEAD_STATUSES, listFiles, listLeads, listRuns, loadSettings, removeFile, removeLeads, saveRun, saveSettings, updateLead, type Lead, type LeadStatus, type MediaFile, type Provider, type Run, type Settings, type Step } from '@/storage'
 import { useAccount } from './account'
+import { PostVideoView, videoPrompt } from './post-video'
+import { Button, cn, Field, inputClass } from './ui'
 
-type View = 'chat' | 'history' | 'leads' | 'settings'
+type View = 'chat' | 'video' | 'history' | 'leads' | 'settings'
 type Pending = ApprovalRequest & { resolve: (ok: boolean) => void }
-
-function cn(...parts: (string | false | null | undefined)[]) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function Button({ children, variant = 'solid', className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'solid' | 'outline' | 'ghost' | 'danger' }) {
-  return (
-    <button
-      {...props}
-      className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-4',
-        variant === 'solid' && 'bg-p1 text-ink hover:brightness-95',
-        variant === 'outline' && 'border border-border bg-card hover:bg-muted',
-        variant === 'ghost' && 'hover:bg-muted',
-        variant === 'danger' && 'bg-danger text-white hover:brightness-110',
-        className,
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium">{label}</span>
-      {children}
-      {hint && <span className="block text-[11px] text-muted-foreground">{hint}</span>}
-    </label>
-  )
-}
-
-const inputClass = 'w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-p1'
 
 // ---------- approval ----------
 
@@ -374,8 +342,8 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
     setView('chat')
   }
 
-  async function send() {
-    const text = input.trim()
+  async function send(override?: string) {
+    const text = (override ?? input).trim()
     if (!text || session.current?.running) return
     setError('')
     try {
@@ -473,6 +441,9 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
           <Button variant="ghost" className="px-2" aria-label="New chat" onClick={newChat}>
             <Plus />
           </Button>
+          <Button variant="ghost" className={cn('px-2', view === 'video' && 'bg-muted')} aria-label="Post a video" title="Post a video to several networks" onClick={() => setView(view === 'video' ? 'chat' : 'video')}>
+            <Video />
+          </Button>
           <Button variant="ghost" className={cn('px-2', view === 'leads' && 'bg-muted')} aria-label="Leads" onClick={() => setView(view === 'leads' ? 'chat' : 'leads')}>
             <Users />
           </Button>
@@ -496,6 +467,18 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         {view === 'settings' && <SettingsView settings={settings} onChange={setSettings} />}
+        {view === 'video' && (
+          <PostVideoView
+            serverUrl={settings.serverUrl}
+            signedIn={account.signedIn}
+            getToken={account.getToken}
+            blocked={keyMissing ? `Add your ${settings.provider === 'claude' ? 'Anthropic' : 'xAI'} key in Settings first` : running ? 'Finish the current run first' : ''}
+            onStart={(plan) => {
+              newChat()
+              void send(videoPrompt(plan))
+            }}
+          />
+        )}
         {view === 'leads' && (
           <LeadsView
             version={leadsVersion}
@@ -541,6 +524,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
                   <li>“Write a LinkedIn post about our launch and post it.”</li>
                   <li>“Make an 8-second clip of steam over coffee and upload it to YouTube as an unlisted Short.”</li>
                   <li>“Post this thread on X: …”</li>
+                  <li>Or use <Video className="inline size-3.5" /> Post a video to send one video to YouTube, Instagram, LinkedIn, X, and Slack.</li>
                   <li>“Find Reddit leads for our open-source LLM observability tool in r/LocalLLaMA and r/devops.”</li>
                   <li>“Look at u/… and tell me whether they’d be a good fit.”</li>
                 </ul>

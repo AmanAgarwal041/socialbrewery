@@ -165,6 +165,12 @@ export async function getMedia(id) {
   return record;
 }
 
+/** The organisation's video library, newest first (the last 100 uploads and generated clips). */
+export async function listMedia() {
+  const index = await readJson(mediaFile(), []);
+  return (Array.isArray(index) ? index : []).map(({ id, name, mime, bytes, createdAt, source }) => ({ id, name, mime, bytes, createdAt, source }));
+}
+
 export function mediaPath(record) {
   const base = path.resolve(mediaDir(), path.basename(record.file || ''));
   const root = path.resolve(mediaDir());
