@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from 'react'
-import { HashnodeIcon, InstagramIcon, LinkedinIcon, RedditIcon, SlackIcon, XIcon, YoutubeIcon } from '@/components/brand-icons'
+import { DevtoIcon, HashnodeIcon, InstagramIcon, LinkedinIcon, RedditIcon, SlackIcon, XIcon, YoutubeIcon } from '@/components/brand-icons'
 import type { Connectors, Health, NetworkId } from '@/lib/api'
 
 export type Slot = 'p1' | 'p2' | 'p3' | 'p4'
@@ -20,6 +20,7 @@ export const NETWORKS: NetworkMeta[] = [
   { id: 'instagram', name: 'Instagram', noun: 'Reel', icon: InstagramIcon, slot: 'p2', blurb: 'Reels to a professional account.' },
   { id: 'x', name: 'X', noun: 'post', icon: XIcon, slot: 'p4', blurb: 'Posts, video, and reply threads on X.' },
   { id: 'hashnode', name: 'Hashnode', noun: 'article', icon: HashnodeIcon, slot: 'p1', blurb: 'Markdown articles and drafts on your blog.' },
+  { id: 'devto', name: 'DEV', noun: 'article', icon: DevtoIcon, slot: 'p4', blurb: 'Markdown articles and drafts on dev.to.' },
   { id: 'slack', name: 'Slack', noun: 'message', icon: SlackIcon, slot: 'p2', blurb: 'Messages, clips, and thread replies in your workspace.' },
   { id: 'reddit', name: 'Reddit', noun: 'post', icon: RedditIcon, slot: 'p3', blurb: 'Text and link posts to subreddits you choose.' },
 ]
@@ -42,6 +43,7 @@ export function networkState(id: NetworkId, health: Health | null, connectors: C
     instagram: connectors?.instagram.account,
     x: connectors?.x?.account,
     hashnode: connectors?.hashnode?.account,
+    devto: connectors?.devto?.account,
     slack: connectors?.slack?.account,
     reddit: connectors?.reddit?.account,
   }[id]

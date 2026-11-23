@@ -675,7 +675,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
               <div className="space-y-3 rounded-xl border border-border bg-card p-4">
                 <p className="font-medium">Tell {providerInfo(settings.provider).label} what to post, or who to find.</p>
                 <p className="text-muted-foreground">
-                  It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, and Hashnode. It fills everything in, then waits for you to approve before anything is published. It can also search Reddit for people who need what you make and keep them under Leads.
+                  It works in this tab with the accounts you’re already signed in to: YouTube, LinkedIn, Instagram, X, Reddit, Slack, Hashnode, and DEV. It fills everything in, then waits for you to approve before anything is published. It can also search Reddit for people who need what you make and keep them under Leads.
                 </p>
                 <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
                   <li>“Write a LinkedIn post about our launch and post it.”</li>

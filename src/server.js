@@ -103,6 +103,7 @@ import {
   publishHashnode,
   updateHashnode,
 } from './hashnode.js';
+import { connectDevto, devtoStatus, disconnectDevto, listDevtoPosts, publishDevto, updateDevto } from './devto.js';
 import {
   SLACK_MANIFEST,
   connectSlack,
@@ -240,12 +241,13 @@ function notice(message) {
 }
 
 async function health() {
-  const [youtube, linkedin, instagram, x, hashnode, slack, reddit] = await Promise.all([
+  const [youtube, linkedin, instagram, x, hashnode, devto, slack, reddit] = await Promise.all([
     youtubeStatus(),
     linkedinStatus(),
     instagramStatus(),
     xStatus(),
     hashnodeStatus(),
+    devtoStatus(),
     slackStatus(),
     redditStatus(),
   ]);
@@ -268,6 +270,8 @@ async function health() {
     xConnected: x.connected,
     hashnodeApp: Boolean(cfg.HASHNODE_TOKEN),
     hashnodeConnected: hashnode.connected,
+    devtoApp: Boolean(cfg.DEVTO_API_KEY),
+    devtoConnected: devto.connected,
     slackApp: Boolean(cfg.SLACK_BOT_TOKEN),
     slackConnected: slack.connected,
     redditApp: Boolean(cfg.REDDIT_CLIENT_ID && cfg.REDDIT_CLIENT_SECRET),
@@ -280,8 +284,8 @@ async function health() {
 
 const CONNECT_COOKIE = 'sb_connect';
 const CONNECT_MINUTES = 20;
-const NETWORK_CALLBACK = /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/callback$/;
-const NETWORK_CONNECT = /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/connect$/;
+const NETWORK_CALLBACK = /^\/api\/(youtube|linkedin|instagram|x|hashnode|devto|slack|reddit)\/callback$/;
+const NETWORK_CONNECT = /^\/api\/(youtube|linkedin|instagram|x|hashnode|devto|slack|reddit)\/connect$/;
 
 function cookies(req) {
   const out = {};
@@ -688,7 +692,7 @@ async function route(req, res) {
 }
 
 const ADMIN_ROUTES = [
-  /^\/api\/(youtube|linkedin|instagram|x|hashnode|slack|reddit)\/(connect|callback|disconnect)$/,
+  /^\/api\/(youtube|linkedin|instagram|x|hashnode|devto|slack|reddit)\/(connect|callback|disconnect)$/,
   /^\/api\/settings$/,
   /^\/api\/instagram\/webhooks\/subscribe$/,
   /^\/api\/org\/connector/,
@@ -751,12 +755,13 @@ async function orgRoute(req, res, url, ctx) {
   }
 
   if (req.method === 'GET' && pathname === '/api/connectors') {
-    const [youtube, linkedin, instagram, x, hashnode, slack, reddit] = await Promise.all([
+    const [youtube, linkedin, instagram, x, hashnode, devto, slack, reddit] = await Promise.all([
       youtubeStatus(),
       linkedinStatus(),
       instagramStatus(),
       xStatus(),
       hashnodeStatus(),
+      devtoStatus(),
       slackStatus(),
       redditStatus(),
     ]);
@@ -792,6 +797,12 @@ async function orgRoute(req, res, url, ctx) {
         ...hashnode,
         analytics: true,
         appReady: Boolean(cfg.HASHNODE_TOKEN),
+        redirectUri: '',
+      },
+      devto: {
+        ...devto,
+        analytics: true,
+        appReady: Boolean(cfg.DEVTO_API_KEY),
         redirectUri: '',
       },
       slack: {
@@ -1063,6 +1074,33 @@ async function orgRoute(req, res, url, ctx) {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/api/devto/status') {
+    sendJson(res, 200, { ...(await devtoStatus()), appReady: Boolean(cfg.DEVTO_API_KEY) });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/devto/connect') {
+    try {
+      const account = await connectDevto();
+      redirect(res, notice(`Connected DEV as ${account.organization ? `${account.organization.name} (@${account.username})` : `@${account.username}`}.`));
+    } catch (err) {
+      console.error(`DEV connect failed: ${err.message}`);
+      redirect(res, notice(err.message));
+    }
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/devto/posts') {
+    sendJson(res, 200, { posts: await listDevtoPosts(Number(url.searchParams.get('limit')) || 20) });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/devto/update') {
+    const body = await readJsonBody(req);
+    sendJson(res, 200, { post: await updateDevto(body) });
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/slack/status') {
     sendJson(res, 200, { ...(await slackStatus()), appReady: Boolean(cfg.SLACK_BOT_TOKEN) });
     return;
@@ -1200,6 +1238,12 @@ async function orgRoute(req, res, url, ctx) {
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/api/devto/disconnect') {
+    await disconnectDevto();
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/api/hashnode/disconnect') {
     await disconnectHashnode();
     sendJson(res, 200, { ok: true });
@@ -1275,6 +1319,19 @@ async function orgRoute(req, res, url, ctx) {
         tags: body.tags,
         coverImageUrl: body.coverImageUrl,
         canonicalUrl: body.canonicalUrl,
+        draft: Boolean(body.draft),
+        source: 'manual',
+      });
+    } else if (network === 'devto') {
+      post = await publishDevto({
+        title: body.title,
+        content: body.description,
+        tags: body.tags,
+        description: body.subtitle,
+        coverImageUrl: body.coverImageUrl,
+        canonicalUrl: body.canonicalUrl,
+        series: body.series,
+        aiDisclosure: body.aiDisclosure,
         draft: Boolean(body.draft),
         source: 'manual',
       });

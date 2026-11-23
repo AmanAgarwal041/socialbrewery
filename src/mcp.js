@@ -15,6 +15,7 @@ import {
   postToX,
   replyOnX,
   postToHashnode,
+  postToDevto,
   postToSlack,
   replyOnSlack,
   postToReddit,
@@ -22,6 +23,7 @@ import {
   redditRules,
 } from './actions.js';
 import { listHashnodePosts, updateHashnode } from './hashnode.js';
+import { DEVTO_AI_LEVELS, listDevtoPosts, updateDevto } from './devto.js';
 import { listSlackChannels } from './slack.js';
 import { deleteReddit, listRedditSubreddits } from './reddit.js';
 import { cfg, publicOrigin } from './context.js';
@@ -50,6 +52,16 @@ const HASHNODE_ARTICLE = {
   content: { type: 'string', description: 'Full article body in Markdown.' },
   tags: { type: 'array', items: { type: 'string' }, description: 'Up to 5 topic tags, e.g. ["AI", "JavaScript"].' },
   coverImageUrl: { type: 'string', description: 'Optional https URL of a cover image.' },
+};
+
+const DEVTO_ARTICLE = {
+  title: { type: 'string', description: 'Article title.' },
+  content: { type: 'string', description: 'Full article body in Markdown. Start with an H2 (##); DEV shows the title as the H1.' },
+  tags: { type: 'array', items: { type: 'string' }, description: 'Up to 4 tags, lowercase letters and digits only, e.g. ["ai", "javascript"].' },
+  description: { type: 'string', description: 'One-sentence summary shown in feeds and link previews.' },
+  coverImageUrl: { type: 'string', description: 'Optional https URL of a cover image.' },
+  series: { type: 'string', description: 'Optional series name, to group related articles.' },
+  aiDisclosure: { type: 'string', enum: DEVTO_AI_LEVELS, description: 'DEV AI disclosure tier. Default some_ai.' },
 };
 
 export const MCP_TOOLS = [
@@ -308,6 +320,45 @@ export const MCP_TOOLS = [
   {
     name: 'list_hashnode_articles',
     description: 'List recent articles on the connected Hashnode blog with views, reactions, and comments.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        limit: { type: 'integer', description: 'How many, up to 50. Default 20.' },
+      },
+    },
+  },
+  {
+    name: 'publish_devto_article',
+    description: 'Publish a Markdown article to the connected DEV (dev.to) account, or save it as a draft. Use draft unless the user asked to publish. Marked on DEV as written with some AI help unless aiDisclosure says otherwise.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ...DEVTO_ARTICLE,
+        canonicalUrl: { type: 'string', description: 'Original URL when the article was first published elsewhere.' },
+        draft: { type: 'boolean', description: 'Save as a draft instead of publishing. Default false.' },
+      },
+      required: ['title', 'content'],
+    },
+  },
+  {
+    name: 'update_devto_article',
+    description: 'Edit an article on the connected DEV account. Omit fields that stay the same. published false turns a published article back into a draft.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        post: { type: 'string', description: 'DEV article id (a number) from list_devto_articles.' },
+        ...DEVTO_ARTICLE,
+        published: { type: 'boolean', description: 'true publishes a draft; false unpublishes.' },
+      },
+      required: ['post'],
+    },
+  },
+  {
+    name: 'list_devto_articles',
+    description: 'List recent articles on the connected DEV account, drafts included, with views, reactions, and comments.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -734,6 +785,15 @@ async function callTool(params, source) {
   }
   if (name === 'list_hashnode_articles') {
     return { articles: await listHashnodePosts(args.limit) };
+  }
+  if (name === 'publish_devto_article') {
+    return postToDevto({ ...args, source });
+  }
+  if (name === 'update_devto_article') {
+    return updateDevto(args);
+  }
+  if (name === 'list_devto_articles') {
+    return { articles: await listDevtoPosts(args.limit) };
   }
   if (name === 'post_slack') {
     return postToSlack({ ...args, source });

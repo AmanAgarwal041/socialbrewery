@@ -92,6 +92,7 @@ export function OverviewPage() {
     { done: Boolean(health?.instagramConnected), label: 'Connect Instagram', to: '/connectors/instagram/connection' },
     { done: Boolean(health?.xConnected), label: 'Connect X', to: '/connectors/x/connection' },
     { done: Boolean(health?.hashnodeConnected), label: 'Connect Hashnode', to: '/connectors/hashnode/connection' },
+    { done: Boolean(health?.devtoConnected), label: 'Connect DEV', to: '/connectors/devto/connection' },
     { done: Boolean(health?.slackConnected), label: 'Connect Slack', to: '/connectors/slack/connection' },
     { done: Boolean(health?.redditConnected), label: 'Connect Reddit', to: '/connectors/reddit/connection' },
     { done: Boolean(connectors && !connectors.grok.localOnly), label: 'Expose the Grok connector with a tunnel', to: '/connectors/grok' },

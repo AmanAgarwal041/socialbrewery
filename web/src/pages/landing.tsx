@@ -35,6 +35,7 @@ const MCP_TOOL_SAMPLE = [
   'post_x',
   'reply_x',
   'publish_hashnode_article',
+  'publish_devto_article',
   'post_slack',
   'reddit_subreddit_rules',
   'analyze_youtube_video',
@@ -162,7 +163,7 @@ export function LandingPage() {
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground text-pretty sm:text-lg">
             Socialbrewery writes the caption, generates a vertical 9:16 clip, and posts it to YouTube Shorts, LinkedIn,
-            Instagram Reels, X, Hashnode, Slack, and Reddit, for your whole team, from one dashboard.
+            Instagram Reels, X, Hashnode, DEV, Slack, and Reddit, for your whole team, from one dashboard.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="h-11 w-full px-5 text-base sm:w-auto">
@@ -258,7 +259,7 @@ export function LandingPage() {
               bullets={
                 <>
                   <Bullet icon={PenLine} slot="p2" title="The fields each network needs">
-                    Shorts privacy and tags, LinkedIn link previews, X replies, Hashnode drafts, Slack threads.
+                    Shorts privacy and tags, LinkedIn link previews, X replies, Hashnode and DEV drafts, Slack threads.
                   </Bullet>
                   <Bullet icon={Sparkles} slot="p1" title="Grok or Claude on hand">
                     Draft with one click, then edit before it goes out.
@@ -278,7 +279,7 @@ export function LandingPage() {
                     Pick who writes the reviews for each organisation, separately from who posts.
                   </Bullet>
                   <Bullet icon={Sparkles} slot="p4" title="Network stats">
-                    Hashnode views and reactions, Slack reactions, Reddit score and upvote ratio.
+                    Hashnode and DEV views and reactions, Slack reactions, Reddit score and upvote ratio.
                   </Bullet>
                 </>
               }
@@ -296,7 +297,7 @@ export function LandingPage() {
                     You bring the network credentials; nothing posts through a shared account.
                   </Bullet>
                   <Bullet icon={Plug} slot="p2" title="Connect and go">
-                    OAuth for YouTube, LinkedIn, Instagram, X, and Reddit; tokens for Slack and Hashnode.
+                    OAuth for YouTube, LinkedIn, Instagram, X, and Reddit; tokens for Slack, Hashnode, and DEV.
                   </Bullet>
                 </>
               }
@@ -346,7 +347,7 @@ export function LandingPage() {
           <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 md:px-8 lg:grid-cols-2">
             <div>
               <SectionTitle eyebrow="Chrome extension" title="Post from your own browser, no connections needed">
-                Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in
+                Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, Hashnode, or DEV in
                 the tabs you’re already signed in to.
               </SectionTitle>
               <ul className="mt-6 space-y-4">

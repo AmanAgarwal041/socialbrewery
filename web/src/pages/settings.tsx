@@ -32,6 +32,7 @@ import {
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  DevtoIcon,
   HashnodeIcon,
   InstagramIcon,
   LinkedinIcon,
@@ -181,6 +182,16 @@ const GROUPS: Group[] = [
     required: [["HASHNODE_TOKEN"]],
   },
   {
+    id: "devto",
+    title: "DEV",
+    description:
+      "API key from dev.to → Settings → Extensions. Optionally, an organisation to post under.",
+    icon: DevtoIcon,
+    tone: "bg-p4-soft text-p4-ink",
+    keys: ["DEVTO_API_KEY", "DEVTO_ORGANIZATION"],
+    required: [["DEVTO_API_KEY"]],
+  },
+  {
     id: "slack",
     title: "Slack",
     description: "Bot token from your Slack app, after Install to Workspace.",
@@ -250,6 +261,7 @@ const TABS: {
       "instagram",
       "x",
       "hashnode",
+      "devto",
       "slack",
       "reddit",
     ],

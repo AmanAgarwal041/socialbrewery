@@ -1,6 +1,6 @@
 import { getToken } from '@clerk/react'
 
-export type NetworkId = 'youtube' | 'linkedin' | 'instagram' | 'x' | 'hashnode' | 'slack' | 'reddit'
+export type NetworkId = 'youtube' | 'linkedin' | 'instagram' | 'x' | 'hashnode' | 'devto' | 'slack' | 'reddit'
 
 export type Role = 'owner' | 'admin' | 'member'
 export type User = { id: string; email: string; name: string; picture: string }
@@ -31,6 +31,8 @@ export type Health = {
   xConnected: boolean
   hashnodeApp: boolean
   hashnodeConnected: boolean
+  devtoApp: boolean
+  devtoConnected: boolean
   slackApp: boolean
   slackConnected: boolean
   redditApp: boolean
@@ -112,6 +114,15 @@ export type HashnodeArticle = {
   tags: string[]
 }
 
+export type DevtoAccount = Profile & {
+  username?: string
+  url?: string
+  organization?: { id: number; username: string; name: string; url: string } | null
+}
+/** DEV articles have the same stats as Hashnode's, plus whether each is published or a draft. */
+export type DevtoArticle = HashnodeArticle & { published: boolean }
+export type DevtoAiLevel = 'no_ai' | 'some_ai' | 'fully_autonomous'
+
 export type Connectors = {
   youtube: { connected: boolean; channel: Channel | null; appReady: boolean; redirectUri: string }
   linkedin: { connected: boolean; profile: Profile | null; appReady: boolean; redirectUri: string }
@@ -125,6 +136,7 @@ export type Connectors = {
   }
   x: { connected: boolean; account: Profile | null; appReady: boolean; redirectUri: string }
   hashnode: { connected: boolean; account: HashnodeAccount | null; appReady: boolean; redirectUri: string }
+  devto: { connected: boolean; account: DevtoAccount | null; appReady: boolean; redirectUri: string }
   slack: {
     connected: boolean
     account: (Profile & { url?: string; botName?: string }) | null
@@ -222,6 +234,7 @@ export type Post = {
   instagramId?: string
   xId?: string
   hashnodeId?: string
+  devtoId?: string
   slackTs?: string
   slackChannel?: string
   slackChannelName?: string
@@ -304,6 +317,7 @@ const GUEST_READS: Record<string, unknown> = {
   '/api/agent/history': { display: [] },
   '/api/youtube/videos': { videos: [] },
   '/api/hashnode/posts': { posts: [] },
+  '/api/devto/posts': { posts: [] },
   '/api/slack/stats': { posts: [] },
   '/api/reddit/stats': { posts: [] },
   '/api/reddit/subreddits': { subreddits: [] },
@@ -346,6 +360,8 @@ export function guestHealth(): Health {
     xConnected: false,
     hashnodeApp: false,
     hashnodeConnected: false,
+    devtoApp: false,
+    devtoConnected: false,
     slackApp: false,
     slackConnected: false,
   } as Health
@@ -359,6 +375,7 @@ export function guestConnectors(): Connectors {
     instagram: { connected: false, account: null, appReady: false, redirectUri: callback('instagram'), needsPublicUrl: false, webhook: null },
     x: { connected: false, account: null, appReady: false, redirectUri: callback('x') },
     hashnode: { connected: false, account: null, appReady: false, redirectUri: '' },
+    devto: { connected: false, account: null, appReady: false, redirectUri: '' },
     slack: { connected: false, account: null, appReady: false, redirectUri: '', defaultChannel: '', manifest: '' },
     reddit: { connected: false, account: null, appReady: false, redirectUri: callback('reddit') },
     grok: { name: 'Socialbrewery', mcpUrl: '', claudeUrl: '', localOnly: false, connectorsPage: 'https://grok.com/connectors', claudePage: 'https://claude.ai/settings/connectors' },
@@ -498,6 +515,7 @@ const VIDEO_HOSTS = new Set([
   'x.com',
   'twitter.com',
   'hashnode.com',
+  'dev.to',
   'www.reddit.com',
   'reddit.com',
   'old.reddit.com',
@@ -530,6 +548,8 @@ export function safeImage(url?: string): string {
   try {
     const parsed = new URL(url || '')
     if (parsed.protocol !== 'https:') return ''
+    // DEV serves images from media*.dev.to.
+    if (parsed.hostname.endsWith('.dev.to')) return parsed.toString()
     if (/(^|\.)(ggpht|googleusercontent|ytimg|licdn|cdninstagram|fbcdn|twimg|hashnode|slack-edge|redditmedia|redditstatic|redd)\.(com|net|it)$/.test(parsed.hostname)) {
       return parsed.toString()
     }

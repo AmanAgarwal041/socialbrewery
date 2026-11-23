@@ -135,6 +135,18 @@ export const ORG_FIELDS = [
     help: 'Blog host (e.g. blog.example.com) or publication id to post to. Leave empty to use your first blog.',
   },
   {
+    key: 'DEVTO_API_KEY',
+    label: 'DEV API key',
+    secret: true,
+    help: 'API key from dev.to → Settings → Extensions → DEV Community API Keys.',
+  },
+  {
+    key: 'DEVTO_ORGANIZATION',
+    label: 'DEV organisation',
+    secret: false,
+    help: 'Optional: post under a DEV organisation you belong to, by the name in its URL (dev.to/<name>). Leave empty to post as yourself.',
+  },
+  {
     key: 'SLACK_BOT_TOKEN',
     label: 'Slack bot token',
     secret: true,
@@ -295,6 +307,8 @@ export function orgDefaults() {
     X_CLIENT_SECRET: '',
     HASHNODE_TOKEN: '',
     HASHNODE_PUBLICATION: '',
+    DEVTO_API_KEY: '',
+    DEVTO_ORGANIZATION: '',
     SLACK_BOT_TOKEN: '',
     SLACK_DEFAULT_CHANNEL: '',
     REDDIT_CLIENT_ID: '',
