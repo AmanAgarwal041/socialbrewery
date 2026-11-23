@@ -5,6 +5,7 @@ import { commentLinkedin, publishLinkedin, updateLinkedInPost as updateLinkedInP
 import { publishInstagramReel } from './instagram.js';
 import { deleteX, publishX, replyX } from './x.js';
 import { publishHashnode } from './hashnode.js';
+import { publishDevto } from './devto.js';
 import { postSlack, replySlack } from './slack.js';
 import {
   commentReddit,
@@ -206,6 +207,23 @@ export async function postToHashnode({ title, subtitle, content, tags, coverImag
     source: source || 'connector',
   });
   return { hashnodeId: post.hashnodeId, url: post.url, title: post.title, draft: Boolean(draft) };
+}
+
+export async function postToDevto({ title, content, tags, description, coverImageUrl, canonicalUrl, series, aiDisclosure, draft, source }) {
+  const post = await publishDevto({
+    title,
+    content,
+    tags,
+    description,
+    coverImageUrl,
+    canonicalUrl,
+    series,
+    // The agent wrote it, so say so unless the person chose a tier.
+    aiDisclosure: aiDisclosure || 'some_ai',
+    draft: Boolean(draft),
+    source: source || 'connector',
+  });
+  return { devtoId: post.devtoId, url: post.url, title: post.title, draft: Boolean(draft) };
 }
 
 export async function postToSlack({ channel, text, mediaId, videoUrl, title, source }) {

@@ -305,24 +305,27 @@ function ActivityAnalysis({ network }: { network: NetworkMeta }) {
   )
 }
 
-function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
+// Hashnode and DEV: article views, reactions, and comments. DEV's list includes drafts, which have no stats yet.
+function ArticleAnalysis({ network }: { network: NetworkMeta & { id: 'hashnode' | 'devto' } }) {
   const { health, connectors } = useAppState()
   const navigate = useNavigate()
-  const state = networkState('hashnode', health, connectors)
-  const [articles, setArticles] = useState<HashnodeArticle[] | null>(null)
+  const state = networkState(network.id, health, connectors)
+  const [all, setAll] = useState<(HashnodeArticle & { published?: boolean })[] | null>(null)
   const [error, setError] = useState('')
+  const articles = useMemo(() => all?.filter((a) => a.published !== false) ?? null, [all])
+  const drafts = useMemo(() => all?.filter((a) => a.published === false) ?? [], [all])
 
   const load = useCallback(async () => {
     setError('')
-    setArticles(null)
+    setAll(null)
     try {
-      const data = await api<{ posts: HashnodeArticle[] }>('/api/hashnode/posts?limit=20')
-      setArticles(data.posts)
+      const data = await api<{ posts: HashnodeArticle[] }>(`/api/${network.id}/posts?limit=20`)
+      setAll(data.posts)
     } catch (err) {
       setError((err as Error).message)
-      setArticles([])
+      setAll([])
     }
-  }, [])
+  }, [network.id])
 
   useEffect(() => {
     if (state.connected) load()
@@ -337,8 +340,8 @@ function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
 
   if (!state.connected) {
     return (
-      <EmptyState icon={network.icon} title="Connect Hashnode to see article stats" action={<Button asChild><Link to="/connectors/hashnode/connection">Connect</Link></Button>}>
-        Views, reactions, and comments for your blog appear here.
+      <EmptyState icon={network.icon} title={`Connect ${network.name} to see article stats`} action={<Button asChild><Link to={`/connectors/${network.id}/connection`}>Connect</Link></Button>}>
+        Views, reactions, and comments for your {network.id === 'devto' ? 'DEV articles' : 'blog'} appear here.
       </EmptyState>
     )
   }
@@ -361,8 +364,8 @@ function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
   function review() {
     navigate('/brew', {
       state: {
-        target: 'hashnode',
-        prompt: 'List my recent Hashnode articles, compare the best and worst by views and reactions, and suggest three article ideas and title changes based on what worked.',
+        target: network.id,
+        prompt: `List my recent ${network.name} articles, compare the best and worst by views and reactions, and suggest three article ideas and title changes based on what worked.`,
       },
     })
   }
@@ -396,7 +399,7 @@ function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
           ) : articles.length ? (
             <Bars items={[...articles].reverse().map((a, i) => ({ label: a.title, value: a.views || 0, hint: `#${i + 1}` }))} />
           ) : (
-            <p className="text-sm text-muted-foreground">This blog has no published articles yet.</p>
+            <p className="text-sm text-muted-foreground">{network.id === 'devto' ? 'No published DEV articles yet.' : 'This blog has no published articles yet.'}</p>
           )}
         </CardContent>
       </Card>
@@ -404,7 +407,7 @@ function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
       <div className="grid gap-3">
         {articles === null
           ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-24 w-full rounded-2xl" />)
-          : articles.map((a) => {
+          : [...drafts, ...(articles || [])].map((a) => {
               const cover = safeImage(a.cover)
               const link = safeLink(a.url)
               return (
@@ -422,7 +425,7 @@ function HashnodeAnalysis({ network }: { network: NetworkMeta }) {
                         {a.title}
                       </a>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {timeAgo(a.publishedAt)}
+                        {a.published === false ? <Badge variant="secondary" className="mr-1">Draft</Badge> : timeAgo(a.publishedAt)}
                         {a.readTime ? ` · ${a.readTime} min read` : ''}
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
@@ -697,7 +700,7 @@ function RedditAnalysis({ network }: { network: NetworkMeta }) {
 
 export function NetworkAnalysis({ network }: { network: NetworkMeta }) {
   if (network.id === 'youtube') return <YoutubeAnalysis network={network} />
-  if (network.id === 'hashnode') return <HashnodeAnalysis network={network} />
+  if (network.id === 'hashnode' || network.id === 'devto') return <ArticleAnalysis network={{ ...network, id: network.id }} />
   if (network.id === 'slack') return <SlackAnalysis network={network} />
   if (network.id === 'reddit') return <RedditAnalysis network={network} />
   return <ActivityAnalysis network={network} />

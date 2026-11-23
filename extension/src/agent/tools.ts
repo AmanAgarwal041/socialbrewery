@@ -125,7 +125,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: 'record_post',
     description: 'After something was actually published, record it with its real link (read it from the page). Never invent a link.',
-    schema: obj({ network: { type: 'string' }, url: { type: 'string' }, title: { type: 'string', description: 'A short description of what was posted.' } }, ['network', 'url', 'title']),
+    schema: obj({ network: { type: 'string', description: 'The network name, e.g. LinkedIn, X, Hashnode, DEV.' }, url: { type: 'string' }, title: { type: 'string', description: 'A short description of what was posted.' } }, ['network', 'url', 'title']),
   },
   // Reddit research only reads; replies still go through the page and the approval gate below.
   ...RESEARCH_TOOLS,

@@ -313,6 +313,8 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
   const [subtitle, setSubtitle] = useState('')
   const [cover, setCover] = useState('')
   const [draft, setDraft] = useState(true)
+  // DEV's AI disclosure tier; empty leaves it undisclosed.
+  const [aiLevel, setAiLevel] = useState('none')
   const [channel, setChannel] = useState('')
   const [channels, setChannels] = useState<SlackChannel[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -372,13 +374,14 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
     if (preview) URL.revokeObjectURL(preview)
   }, [preview])
 
-  const article = network.id === 'hashnode'
+  const isDevto = network.id === 'devto'
+  const article = network.id === 'hashnode' || isDevto
   const linkCard = network.id === 'linkedin' && !file
   const textOnly = network.id === 'linkedin' || network.id === 'x' || article || isSlack || isReddit
   const needsVideo = !textOnly
   const textLabel =
     network.id === 'youtube' ? 'Description' : article ? 'Article (Markdown)' : isReddit ? 'Body (Markdown, optional)' : isSlack ? 'Message' : textOnly ? 'Post text' : 'Caption'
-  const limit = { youtube: 5000, linkedin: 3000, instagram: 2200, x: 280, hashnode: 0, slack: 4000, reddit: 40000 }[network.id]
+  const limit = { youtube: 5000, linkedin: 3000, instagram: 2200, x: 280, hashnode: 0, devto: 0, slack: 4000, reddit: 40000 }[network.id]
   const length = network.id === 'x' ? xLength(description) : description.length
   const words = description.trim() ? description.trim().split(/\s+/).length : 0
 
@@ -399,8 +402,12 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
       toast.error(`${network.name} needs ${article ? 'the article body' : 'post text'}.`)
       return
     }
-    if (article && title.trim().length < 6) {
+    if (network.id === 'hashnode' && title.trim().length < 6) {
       toast.error('Hashnode needs a title of at least 6 characters.')
+      return
+    }
+    if (isDevto && !title.trim()) {
+      toast.error('DEV needs a title.')
       return
     }
     if (manualReddit) {
@@ -420,6 +427,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
         privacyStatus: privacy,
         madeForKids: kids,
         ...(article ? { subtitle, coverImageUrl: cover, draft } : {}),
+        ...(isDevto && aiLevel !== 'none' ? { aiDisclosure: aiLevel } : {}),
         ...(isSlack ? { channel } : {}),
         ...(linkCard && link.trim() ? { linkUrl: link.trim(), linkTitle: linkTitle.trim() } : {}),
         ...(isReddit
@@ -437,7 +445,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
       const channelName = channels?.find((c) => c.id === channel)?.name
       toast.success(
         article && draft
-          ? 'Saved as a Hashnode draft.'
+          ? `Saved as a ${network.name} draft.`
           : isReddit
             ? `Posted to r/${details?.name || subreddit.replace(/^\/?r\//i, '')}.`
             : isSlack && channelName ? `Posted to #${channelName}.` : `Posted to ${network.name}.`,
@@ -473,7 +481,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
               : isSlack
               ? `Write a short Slack message for my team in Slack mrkdwn about: ${description || '…'}`
               : article
-              ? `Write a Hashnode article${title ? ` titled “${title}”` : ''} with an intro, a few headed sections, and a short conclusion, then save it as a draft. Topic: ${description.slice(0, 400) || '…'}`
+              ? `Write a ${network.name} article${title ? ` titled “${title}”` : ''} with an intro, a few headed sections, and a short conclusion, then save it as a draft. Topic: ${description.slice(0, 400) || '…'}`
               : 'Write a caption with a few hashtags for the attached video and post it as an Instagram Reel.'
     navigate('/brew', { state: { prompt, target: network.id } })
   }
@@ -498,7 +506,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
               <Input
                 id="compose-title"
                 value={title}
-                maxLength={article ? 250 : isReddit ? 300 : 100}
+                maxLength={isDevto ? 128 : article ? 250 : isReddit ? 300 : 100}
                 required={network.id === 'youtube' || article || isReddit}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={article ? 'A clear, specific headline' : isReddit ? 'Plain and specific — no clickbait' : 'Up to 100 characters'}
@@ -571,8 +579,14 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
           )}
           {article && (
             <div className="space-y-2">
-              <Label htmlFor="compose-subtitle">Subtitle</Label>
-              <Input id="compose-subtitle" value={subtitle} maxLength={150} onChange={(e) => setSubtitle(e.target.value)} placeholder="Optional one-line summary" />
+              <Label htmlFor="compose-subtitle">{isDevto ? 'Description' : 'Subtitle'}</Label>
+              <Input
+                id="compose-subtitle"
+                value={subtitle}
+                maxLength={isDevto ? 170 : 150}
+                onChange={(e) => setSubtitle(e.target.value)}
+                placeholder={isDevto ? 'Optional: one sentence for feeds and link previews' : 'Optional one-line summary'}
+              />
             </div>
           )}
           {!(isReddit && kind === 'link') && (
@@ -658,7 +672,7 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="compose-tags">Tags</Label>
-                  <Input id="compose-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="AI, JavaScript (up to 5)" />
+                  <Input id="compose-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={isDevto ? 'ai, javascript (up to 4)' : 'AI, JavaScript (up to 5)'} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="compose-cover">Cover image URL</Label>
@@ -668,8 +682,26 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
               <div className="flex items-center gap-2">
                 <Switch id="compose-draft" checked={draft} onCheckedChange={setDraft} />
                 <Label htmlFor="compose-draft">Save as draft</Label>
-                <span className="text-xs text-muted-foreground">{draft ? 'Review it on Hashnode before publishing.' : 'Publishes to your blog right away.'}</span>
+                <span className="text-xs text-muted-foreground">
+                  {draft ? `Review it on ${network.name} before publishing.` : isDevto ? 'Publishes to DEV right away.' : 'Publishes to your blog right away.'}
+                </span>
               </div>
+              {isDevto && (
+                <div className="space-y-2 sm:max-w-xs">
+                  <Label htmlFor="compose-ai">AI disclosure</Label>
+                  <Select value={aiLevel} onValueChange={setAiLevel}>
+                    <SelectTrigger id="compose-ai" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Don’t say</SelectItem>
+                      <SelectItem value="no_ai">Written without AI</SelectItem>
+                      <SelectItem value="some_ai">Written with some AI help</SelectItem>
+                      <SelectItem value="fully_autonomous">Written by AI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </>
           )}
           {network.id === 'youtube' && (
@@ -762,9 +794,15 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
           <CardHeader>
             <CardTitle>Article</CardTitle>
             <CardDescription>
-              {connectors?.hashnode?.account?.publication?.title
-                ? `Goes to ${connectors.hashnode.account.publication.title}.`
-                : 'Goes to your connected blog.'}
+              {isDevto
+                ? connectors?.devto?.account?.organization
+                  ? `Goes to DEV under ${connectors.devto.account.organization.name}.`
+                  : connectors?.devto?.account?.username
+                    ? `Goes to DEV as @${connectors.devto.account.username}.`
+                    : 'Goes to your DEV account.'
+                : connectors?.hashnode?.account?.publication?.title
+                  ? `Goes to ${connectors.hashnode.account.publication.title}.`
+                  : 'Goes to your connected blog.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -779,11 +817,20 @@ export function NetworkCompose({ network }: { network: NetworkMeta }) {
                 <p className="text-sm font-semibold tabular-nums">{Math.max(1, Math.round(words / 230))} min</p>
               </div>
             </div>
-            <ul className="space-y-1.5 text-xs text-muted-foreground">
-              <li>Start with an H2 (##); Hashnode shows the title as the H1.</li>
-              <li>Tags help readers find it. Hashnode creates any tag that does not exist yet.</li>
-              <li>Drafts appear in your Hashnode dashboard, ready to edit and publish.</li>
-            </ul>
+            {isDevto ? (
+              <ul className="space-y-1.5 text-xs text-muted-foreground">
+                <li>Start with an H2 (##); DEV shows the title as the H1.</li>
+                <li>Up to 4 tags, letters and digits only. Popular tags such as webdev or ai reach more readers.</li>
+                <li>DEV asks authors to disclose AI help. Pick a tier, or edit it on DEV later.</li>
+                <li>Drafts appear in your DEV dashboard, ready to edit and publish.</li>
+              </ul>
+            ) : (
+              <ul className="space-y-1.5 text-xs text-muted-foreground">
+                <li>Start with an H2 (##); Hashnode shows the title as the H1.</li>
+                <li>Tags help readers find it. Hashnode creates any tag that does not exist yet.</li>
+                <li>Drafts appear in your Hashnode dashboard, ready to edit and publish.</li>
+              </ul>
+            )}
           </CardContent>
         </Card>
       ) : (

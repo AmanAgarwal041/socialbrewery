@@ -36,7 +36,7 @@ export function ExtensionPage() {
         title="Post from your own browser"
         icon={Puzzle}
         iconClass="bg-palette text-ink"
-        description="Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in the tabs you’re already signed in to. It can also search Reddit for people who need what you make. No connections to set up, and nothing goes live until you approve it."
+        description="Claude or Grok writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, Hashnode, or DEV in the tabs you’re already signed in to. It can also search Reddit for people who need what you make. No connections to set up, and nothing goes live until you approve it."
         actions={
           <Button asChild>
             <a href={ZIP} download="socialbrewery-extension.zip">

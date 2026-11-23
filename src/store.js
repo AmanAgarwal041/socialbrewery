@@ -15,7 +15,7 @@ const historyFile = () => orgFile('history.json');
 const mediaFile = () => orgFile('media.json');
 const analysisFile = () => orgFile('analyses.json');
 
-export const NETWORKS = new Set(['youtube', 'linkedin', 'instagram', 'x', 'hashnode', 'slack', 'reddit']);
+export const NETWORKS = new Set(['youtube', 'linkedin', 'instagram', 'x', 'hashnode', 'devto', 'slack', 'reddit']);
 
 function networkTokenFile(network) {
   if (!NETWORKS.has(network)) throw new Error('Unknown network.');

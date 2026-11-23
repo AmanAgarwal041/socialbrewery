@@ -96,7 +96,11 @@ export async function mergeExtensionRuns(userId, body) {
     return { runs: shrink([...byId.values()]), deleted: [...deleted].slice(-1000) };
   });
   for (const post of newPosts) {
-    const network = post.network.toLowerCase().replace(/^twitter$/, 'x');
+    const network = post.network
+      .trim()
+      .toLowerCase()
+      .replace(/^twitter$/, 'x')
+      .replace(/^(dev|dev\.to|dev community)$/, 'devto');
     if (!NETWORKS.has(network)) continue;
     await addPost({
       id: randomBytes(8).toString('hex'),

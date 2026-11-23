@@ -4,15 +4,16 @@ import { generateShort, grokChat } from './grok.js';
 import { analyzeVideo } from './analysis.js';
 import { openaiChat } from './openai.js';
 import { listChannelVideos, publishShort, updateVideo } from './youtube.js';
-import { commentOnLinkedIn, postToHashnode, postToLinkedIn, postToSlack, postToX, replyOnSlack, replyOnX, postToReddit, commentOnReddit, redditRules } from './actions.js';
+import { commentOnLinkedIn, postToDevto, postToHashnode, postToLinkedIn, postToSlack, postToX, replyOnSlack, replyOnX, postToReddit, commentOnReddit, redditRules } from './actions.js';
 import { listHashnodePosts } from './hashnode.js';
+import { listDevtoPosts } from './devto.js';
 import { listSlackChannels } from './slack.js';
 import { publishInstagramReel } from './instagram.js';
 import { getMedia, loadHistory, saveHistory } from './store.js';
 import { cfg } from './context.js';
 import { REDDIT_RESEARCH_TOOLS, REDDIT_RESEARCH_TOOL_NAMES, runRedditResearchTool } from './reddit-research.js';
 
-const SYSTEM_TEMPLATE = `You are {{NAME}}, the posting agent inside Socialbrewery. You help one person publish to the channels they connected: YouTube Shorts, LinkedIn, Instagram Reels, X, a Hashnode blog, Slack, and Reddit.
+const SYSTEM_TEMPLATE = `You are {{NAME}}, the posting agent inside Socialbrewery. You help one person publish to the channels they connected: YouTube Shorts, LinkedIn, Instagram Reels, X, a Hashnode blog, DEV (dev.to), Slack, and Reddit.
 
 You can:
 - generate_short_video: make a new vertical clip (9:16, up to 15 seconds) from a prompt.
@@ -27,6 +28,8 @@ You can:
 - reply_x: reply under an existing X post, using its id or link. Use it to continue a thread.
 - publish_hashnode_article: publish a Markdown article to Hashnode, or save it as a draft. Write a real article with headings, not a social caption. Use draft true unless they clearly asked to publish.
 - list_hashnode_articles: recent Hashnode articles with views, reactions, and comments.
+- publish_devto_article: publish a Markdown article to DEV (dev.to), or save it as a draft. Write a real article with headings, starting at H2, plus a one-sentence description and up to 4 tags (lowercase letters and digits). Use draft true unless they clearly asked to publish. It is marked on DEV as written with some AI help.
+- list_devto_articles: recent DEV articles, drafts included, with views, reactions, and comments.
 - post_slack: post a message (optionally with a mediaId video) to a Slack channel. Use Slack mrkdwn: *bold*, _italic_, <https://url|label>. If they did not name a channel, omit it to use the default; if that fails, call list_slack_channels and ask which one.
 - reply_slack: reply in the thread of a Slack message, using its link.
 - list_slack_channels: channels the Slack app can see.
@@ -50,7 +53,7 @@ Rules:
 - Prefer the privacy they named for YouTube. If they did not name one, use the preferred privacy in their message. Otherwise use unlisted.
 - Titles are at most 100 characters for YouTube. Put #Shorts in the YouTube description. Tags are short phrases without a hash.
 - Reddit: post only to a subreddit the person named, one subreddit per request, and never cross-post the same content to several subreddits. If the rules forbid self-promotion or the post type, say so instead of posting.
-- Never invent a YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit link or a view count. Only share numbers returned by the tools.
+- Never invent a YouTube, LinkedIn, Instagram, X, Hashnode, DEV, Slack, or Reddit link or a view count. Only share numbers returned by the tools.
 - Do not change privacy, title, description, or tags unless the person asked for that change.
 - If a tool returns an error, explain it in plain language and say what to fix. Do not pretend the upload worked.
 - Keep replies short.`;
@@ -270,6 +273,42 @@ const TOOLS = [
     function: {
       name: 'list_hashnode_articles',
       description: 'List recent articles on the connected Hashnode blog with views, reactions, and comments.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          limit: { type: 'integer', description: 'Up to 50. Default 10.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'publish_devto_article',
+      description: 'Publish a Markdown article to DEV (dev.to), or save it as a draft.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          title: { type: 'string' },
+          content: { type: 'string', description: 'Full article body in Markdown. Start with an H2 (##); DEV shows the title as the H1.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'Up to 4 tags, lowercase letters and digits only, e.g. ["ai", "javascript"].' },
+          description: { type: 'string', description: 'One-sentence summary shown in feeds and link previews.' },
+          coverImageUrl: { type: 'string' },
+          canonicalUrl: { type: 'string', description: 'Original URL when the article was first published elsewhere.' },
+          series: { type: 'string', description: 'Series name, to group related articles.' },
+          draft: { type: 'boolean', description: 'true saves a draft instead of publishing.' },
+        },
+        required: ['title', 'content', 'draft'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_devto_articles',
+      description: 'List recent DEV (dev.to) articles, drafts included, with views, reactions, and comments.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -561,6 +600,8 @@ function statusFor(name) {
   if (name === 'reply_x') return 'Replying on X…';
   if (name === 'publish_hashnode_article') return 'Sending the article to Hashnode…';
   if (name === 'list_hashnode_articles') return 'Reading the Hashnode blog…';
+  if (name === 'publish_devto_article') return 'Sending the article to DEV…';
+  if (name === 'list_devto_articles') return 'Reading your DEV articles…';
   if (name === 'post_slack') return 'Posting to Slack…';
   if (name === 'reply_slack') return 'Replying in the Slack thread…';
   if (name === 'list_slack_channels') return 'Reading Slack channels…';
@@ -600,6 +641,11 @@ function summarize(name, result) {
     return result.url ? `${verb}: ${result.url}` : `${verb}.`;
   }
   if (name === 'list_hashnode_articles') return `Found ${result.articles?.length || 0} Hashnode articles.`;
+  if (name === 'publish_devto_article') {
+    const verb = result.draft ? 'Saved a DEV draft' : 'Published on DEV';
+    return result.url ? `${verb}: ${result.url}` : `${verb}.`;
+  }
+  if (name === 'list_devto_articles') return `Found ${result.articles?.length || 0} DEV articles.`;
   if (name === 'post_slack') {
     const where = result.channel ? ` in #${result.channel}` : '';
     return result.url ? `Posted to Slack${where}: ${result.url}` : `Posted to Slack${where}.`;
@@ -702,6 +748,12 @@ async function runTool(name, args, { madeForKids, send, signal }) {
   }
   if (name === 'list_hashnode_articles') {
     return { articles: await listHashnodePosts(args.limit || 10) };
+  }
+  if (name === 'publish_devto_article') {
+    return postToDevto({ ...args, source: 'agent' });
+  }
+  if (name === 'list_devto_articles') {
+    return { articles: await listDevtoPosts(args.limit || 10) };
   }
   if (name === 'post_slack') {
     const result = await postToSlack({ channel: args.channel, text: args.text, mediaId: args.mediaId, source: 'agent' });

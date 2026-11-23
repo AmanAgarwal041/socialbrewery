@@ -63,6 +63,14 @@ export const PLAYBOOKS: Playbook[] = [
     publish: /^(publish|publish now|update|schedule)$/i,
     hints: `Write at https://hashnode.com/draft (or the blog dashboard's "New article"). Fill the title, then the Markdown editor body: write a real article with headings, not a caption. Tags and the cover image are in the publish panel. Save as a draft unless the user clearly asked to publish; the final button is "Publish".`,
   },
+  {
+    network: 'DEV',
+    hosts: /(^|\.)dev\.to$/,
+    start: 'https://dev.to/new',
+    // "Save changes" updates a published article in place; "Submit" posts a comment.
+    publish: /^(publish|save changes|schedule|submit)$/i,
+    hints: `Write at https://dev.to/new (dev.to's "Create Post"). Fill "New post title here...", then up to 4 tags in "Add up to 4 tags..." (lowercase letters and digits; pick each from the suggestions), then the Markdown body: a real article starting at H2 (##), since the title is the H1. The cover image is "Add a cover image"; the canonical URL and series are under the post options (gear icon) next to the buttons. DEV asks authors to disclose AI help: if the editor shows an AI disclosure choice, pick "some AI" for text you wrote for the user, unless they say otherwise. Click "Save draft" unless the user clearly asked to publish; "Publish" makes it public.`,
+  },
 ]
 
 export function playbookFor(url: string): Playbook | undefined {

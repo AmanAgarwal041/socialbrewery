@@ -78,6 +78,16 @@ const SETUP: Record<NetworkId, { steps: React.ReactNode[]; docs: { label: string
       'Click Connect. Socialbrewery checks the token and remembers which blog to post to. There is no redirect to approve.',
     ],
   },
+  devto: {
+    docs: { label: 'DEV extensions settings', href: 'https://dev.to/settings/extensions' },
+    steps: [
+      'On dev.to, open Settings → Extensions and scroll to DEV Community API Keys.',
+      'Give the key a name (e.g. Socialbrewery) and click Generate API Key.',
+      'Paste it in Settings as the DEV API key. To post under an organisation you belong to, add its name from its dev.to URL, then save.',
+      'Click Connect. Socialbrewery checks the key and remembers your account. There is no redirect to approve.',
+      'Articles written by the assistant are marked on DEV as written with some AI help, as DEV’s guidelines ask.',
+    ],
+  },
   slack: {
     docs: { label: 'Slack apps', href: 'https://api.slack.com/apps?new_app=1' },
     steps: [
@@ -212,7 +222,7 @@ function NetworkOverview({ network }: { network: NetworkMeta }) {
               { to: 'compose', label: `Compose a ${network.noun}`, icon: PenSquare },
               {
                 to: 'analysis',
-                label: { youtube: 'Review video performance', hashnode: 'Article stats', slack: 'Reactions and replies', reddit: 'Scores and comments' }[network.id as string] || 'Posting activity',
+                label: { youtube: 'Review video performance', hashnode: 'Article stats', devto: 'Article stats', slack: 'Reactions and replies', reddit: 'Scores and comments' }[network.id as string] || 'Posting activity',
                 icon: LineChart,
               },
               { to: 'connection', label: 'Connection and setup', icon: Plug },
@@ -377,6 +387,13 @@ function NetworkConnection({ network }: { network: NetworkMeta }) {
           ) : network.id === 'hashnode' ? (
             state.connectors?.hashnode.account?.publication?.url && (
               <CopyField label="Blog" value={state.connectors.hashnode.account.publication.url} />
+            )
+          ) : network.id === 'devto' ? (
+            state.connectors?.devto.account?.url && (
+              <CopyField
+                label={state.connectors.devto.account.organization ? 'Posts as organisation' : 'Profile'}
+                value={state.connectors.devto.account.organization?.url || state.connectors.devto.account.url}
+              />
             )
           ) : (
             <CopyField label="Redirect URI" value={info?.redirectUri || ''} />

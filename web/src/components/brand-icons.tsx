@@ -39,6 +39,18 @@ export function XIcon(props: IconProps) {
   )
 }
 
+// DEV (dev.to): its black badge, drawn as an outline with the letters in strokes.
+export function DevtoIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" {...props}>
+      <rect x="2.5" y="5.5" width="19" height="13" rx="3" />
+      <path d="M6.3 9.4v5.2h.9a2.6 2.6 0 0 0 0-5.2z" strokeWidth={1.4} />
+      <path d="M12.4 9.4h-2v5.2h2M10.4 12h1.6" strokeWidth={1.4} />
+      <path d="m14.6 9.4 1.6 5.2 1.6-5.2" strokeWidth={1.4} />
+    </svg>
+  )
+}
+
 export function HashnodeIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" {...props}>

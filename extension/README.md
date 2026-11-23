@@ -1,7 +1,7 @@
 # Socialbrewery for Chrome
 
 A side-panel agent that does what Socialbrewery's Brew does, but in your own browser: Claude or Grok
-writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, or Hashnode in
+writes the post, then fills it in on YouTube, LinkedIn, Instagram, X, Reddit, Slack, Hashnode, or DEV in
 the tab you're signed in to. There are no API connections to set up. Nothing is published until you
 click **Approve** in the side panel.
 

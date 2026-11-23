@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { BrewIcon, HashnodeIcon, InstagramIcon, LinkedinIcon, RedditIcon, SlackIcon, XIcon, YoutubeIcon } from '@/components/brand-icons'
+import { BrewIcon, DevtoIcon, HashnodeIcon, InstagramIcon, LinkedinIcon, RedditIcon, SlackIcon, XIcon, YoutubeIcon } from '@/components/brand-icons'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,6 +56,8 @@ const TOOL_META: Record<string, { icon: Icon; slot: Slot; label: string }> = {
   reply_x: { icon: MessageSquareText, slot: 'p4', label: 'X reply' },
   publish_hashnode_article: { icon: HashnodeIcon, slot: 'p1', label: 'Hashnode article' },
   list_hashnode_articles: { icon: BarChart3, slot: 'p1', label: 'Hashnode stats' },
+  publish_devto_article: { icon: DevtoIcon, slot: 'p4', label: 'DEV article' },
+  list_devto_articles: { icon: BarChart3, slot: 'p4', label: 'DEV stats' },
   post_slack: { icon: SlackIcon, slot: 'p2', label: 'Slack message' },
   reply_slack: { icon: MessageSquareText, slot: 'p2', label: 'Slack reply' },
   list_slack_channels: { icon: SlackIcon, slot: 'p2', label: 'Slack channels' },
@@ -108,6 +110,12 @@ const SUGGESTIONS: { network: NetworkId | 'any'; title: string; prompt: string }
       'Write a 900-word Hashnode article on how to observe and debug an AI agent in production, with an intro, headed sections, a code example, and a conclusion. Add 4 tags and save it as a draft.',
   },
   {
+    network: 'devto',
+    title: 'Draft a DEV article',
+    prompt:
+      'Write a 900-word DEV article for developers on how to trace and debug an AI agent in production, with headed sections starting at H2, a code example, and a conclusion. Add a one-sentence description and 4 tags, and save it as a draft.',
+  },
+  {
     network: 'slack',
     title: 'Announce in Slack',
     prompt:
@@ -133,7 +141,7 @@ const SUGGESTIONS: { network: NetworkId | 'any'; title: string; prompt: string }
   },
 ]
 
-const TARGET_PREFIX = /^\[(YouTube|LinkedIn|Instagram|X|Hashnode|Slack|Reddit)\]\s*/
+const TARGET_PREFIX = /^\[(YouTube|LinkedIn|Instagram|X|Hashnode|DEV|Slack|Reddit)\]\s*/
 
 function Linkified({ text }: { text: string }) {
   const parts = text.split(/(https?:\/\/[^\s)]+)/g)
@@ -277,7 +285,7 @@ function EmptyChat({ onPick, agent, keyName, ready }: { onPick: (prompt: string,
       </div>
       <h1 className="text-3xl font-semibold tracking-tight">What should we brew today?</h1>
       <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-        Ask {agent} to write the copy, generate a vertical clip, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, Slack, or Reddit.
+        Ask {agent} to write the copy, generate a vertical clip, and post it to YouTube, LinkedIn, Instagram, X, Hashnode, DEV, Slack, or Reddit.
         Attach a video to post your own.{agent !== 'Grok' && ` ${agent} can make clips too: they are generated with Grok Imagine, so that needs your xAI key.`}
       </p>
       {!ready && (
