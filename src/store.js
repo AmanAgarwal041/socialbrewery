@@ -80,19 +80,36 @@ export function addPost(post) {
   });
 }
 
-export async function loadHistory() {
-  const history = await readJson(historyFile(), { display: [], model: [] });
+// Brew's conversation: `display` is what the dashboard shows, `model` is what the assistant sees.
+// Without a file it is the organisation's older shared chat; with one (`brewChatFile`) it is one
+// person's conversation, which also keeps its title, provider, and creation time.
+export async function loadHistory(file = historyFile()) {
+  const history = await readJson(file, { display: [], model: [] });
   return {
+    ...history,
     display: Array.isArray(history.display) ? history.display : [],
     model: Array.isArray(history.model) ? history.model : [],
   };
 }
 
-export function saveHistory(history) {
-  return enqueue(() => writeJson(historyFile(), {
+export function saveHistory(history, file = historyFile()) {
+  return enqueue(() => writeJson(file, {
+    ...history,
     display: history.display.slice(-100),
     model: history.model,
   }));
+}
+
+/** One person's Brew conversation in the current organisation. */
+export function brewChatFile(userId, chatId) {
+  const user = String(userId || '').replace(/[^\w-]/g, '').slice(0, 64);
+  const chat = String(chatId || '');
+  if (!user || !/^[\w-]{1,64}$/.test(chat)) throw new Error('Unknown conversation.');
+  return orgFile(`brew-chat-${user}-${chat}.json`);
+}
+
+export function removeBrewChat(userId, chatId) {
+  return enqueue(() => removeEntry(brewChatFile(userId, chatId)));
 }
 
 export async function listAnalyses() {

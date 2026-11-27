@@ -9,7 +9,8 @@ import { listHashnodePosts } from './hashnode.js';
 import { listDevtoPosts } from './devto.js';
 import { listSlackChannels } from './slack.js';
 import { publishInstagramReel } from './instagram.js';
-import { getMedia, loadHistory, saveHistory } from './store.js';
+import { brewChatFile, getMedia, loadHistory, saveHistory } from './store.js';
+import { brewRunSummary, saveDashboardRun } from './extension.js';
 import { cfg } from './context.js';
 import { REDDIT_RESEARCH_TOOLS, REDDIT_RESEARCH_TOOL_NAMES, runRedditResearchTool } from './reddit-research.js';
 
@@ -491,7 +492,38 @@ function systemPrompt(provider) {
   return SYSTEM_TEMPLATE.replace('{{NAME}}', agentName(provider));
 }
 
-export async function runAgent({ text, mediaId, privacyStatus, madeForKids, provider: requested, send, signal }) {
+/**
+ * One message to Brew. With `chat` ({ userId, id, resume }) it continues that person's conversation
+ * and keeps its summary in the list the extension shares (`resume` is a transcript a new chat starts
+ * from). Without it, it uses the organisation's older shared chat.
+ */
+export async function runAgent(options) {
+  const { chat } = options;
+  if (!chat) return agentTurn(options, undefined, async () => {});
+  const file = brewChatFile(chat.userId, chat.id);
+  const provider = agentProvider(options.provider);
+  let history = null;
+  const sync = async (status) => {
+    if (!history?.display.length) return;
+    await saveDashboardRun(chat.userId, brewRunSummary(chat.id, history, status));
+  };
+  const onSave = async (current) => {
+    history = current;
+    if (!history.createdAt) history.createdAt = Date.now();
+    if (!history.title) history.title = String(options.text || '').trim().replace(/\s+/g, ' ').slice(0, 80) || 'Video post';
+    history.provider = provider;
+    await sync('running');
+  };
+  try {
+    await agentTurn({ ...options, provider }, file, onSave, chat.resume);
+    await sync('done');
+  } catch (err) {
+    await sync(options.signal?.aborted ? 'stopped' : 'error').catch(() => {});
+    throw err;
+  }
+}
+
+async function agentTurn({ text, mediaId, privacyStatus, madeForKids, provider: requested, send, signal }, file, onSave, resume = '') {
   const provider = agentProvider(requested);
   const missing = agentKeyMissing(provider);
   if (missing) throw new Error(missing);
@@ -504,13 +536,20 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
     if (!media) throw new Error('That attached video is no longer available.');
   }
 
-  const history = await loadHistory();
+  const history = await loadHistory(file);
+  const save = async () => {
+    await onSave(history);
+    await saveHistory(history, file);
+  };
   const modelText = [
+    resume && !history.model.length ? `This continues an earlier conversation. Read it for context; do not redo anything it already did.\n\n<earlier>\n${resume}\n</earlier>\n` : '',
     spoken,
     media ? `Attached video mediaId: ${media.id} (${media.name}).` : 'No video is attached.',
     `Preferred privacy: ${privacyStatus || 'unlisted'}.`,
     `Made for kids: ${madeForKids ? 'yes' : 'no'}. Leave this as the user set it.`,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   history.model.push({ role: 'user', content: modelText });
   history.model = trimModel(history.model);
@@ -523,7 +562,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
     at: new Date().toISOString(),
   };
   history.display.push(userItem);
-  await saveHistory(history);
+  await save();
 
   for (let step = 0; step < 10; step += 1) {
     if (signal?.aborted) throw new Error('Stopped.');
@@ -543,7 +582,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
     }
     const calls = message.tool_calls || [];
     if (!calls.length) {
-      await saveHistory(history);
+      await save();
       return;
     }
     for (const call of calls) {
@@ -575,7 +614,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
       };
       history.display.push(item);
       send('message', item);
-      await saveHistory(history);
+      await save();
     }
   }
 
@@ -584,7 +623,7 @@ export async function runAgent({ text, mediaId, privacyStatus, madeForKids, prov
   const item = { id: randomUUID(), role: 'assistant', content: note, at: new Date().toISOString() };
   history.display.push(item);
   send('message', item);
-  await saveHistory(history);
+  await save();
 }
 
 function statusFor(name) {

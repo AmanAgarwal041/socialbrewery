@@ -96,6 +96,8 @@ export type PostRecord = { network: string; url: string; title: string; at: numb
 export type Run = {
   id: string
   title: string
+  /** Where it ran: this extension, or Brew in the Socialbrewery dashboard (synced in, read-only here). */
+  source?: 'extension' | 'dashboard'
   provider: Provider
   status: 'running' | 'done' | 'stopped' | 'error'
   createdAt: number
