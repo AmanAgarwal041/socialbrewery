@@ -193,6 +193,20 @@ test('Clerk sessions, organisation roles, and the connector scope every request'
     assert.equal((await fromExtension({ runs: [], deleted: ['run-1'] })).status, 200);
     assert.equal((await fromExtension({ runs: [run] })).status, 200);
     assert.deepEqual((await fetch(`${base}/api/extension/runs`, { headers: { Authorization: `Bearer ${extToken}` } }).then((res) => res.json())).runs, []);
+    // The dashboard lists the same conversations for the same person, and continues extension runs only as new chats.
+    assert.equal((await fromExtension({ runs: [{ ...run, id: 'run-2', posts: [] }] })).status, 200);
+    const listed = await fetch(`${base}/api/conversations`, as(adminToken)).then((res) => res.json());
+    assert.deepEqual(listed.conversations.map((c) => [c.id, c.source]), [['run-2', 'extension']]);
+    const opened = await fetch(`${base}/api/conversations/run-2`, as(adminToken)).then((res) => res.json());
+    assert.equal(opened.conversation.continues, false);
+    assert.equal(opened.conversation.display[0].content, 'Post it');
+    assert.equal(opened.conversation.run, undefined);
+    assert.deepEqual((await fetch(`${base}/api/conversations`, as(memberToken)).then((res) => res.json())).conversations, []);
+    assert.equal((await fetch(`${base}/api/conversations/run-2`, as(memberToken))).status, 404);
+    const inPlace = await fetch(`${base}/api/agent/message`, as(adminToken, { method: 'POST', body: JSON.stringify({ text: 'More', chatId: 'run-2' }) }));
+    assert.equal(inPlace.status, 409);
+    assert.equal((await fetch(`${base}/api/conversations/run-2`, as(adminToken, { method: 'DELETE' }))).status, 200);
+    assert.deepEqual((await fetch(`${base}/api/extension/runs`, { headers: { Authorization: `Bearer ${extToken}` } }).then((res) => res.json())).deleted.slice(-1), ['run-2']);
     const strangerExt = sessionToken({ sub: 'user_ada', o: { id: 'org_brew', rol: 'admin' }, azp: 'chrome-extension://someoneelse' });
     assert.equal((await fromExtension({ runs: [run] }, strangerExt, 'chrome-extension://someoneelse')).status, 403);
 

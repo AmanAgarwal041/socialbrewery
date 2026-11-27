@@ -15,7 +15,7 @@ import {
   saveOrgConfig,
 } from './accounts.js';
 import { clerkConfigured, clerkPublishableKey, extraOrigins, verifySessionToken } from './clerk.js';
-import { loadExtensionRuns, mergeExtensionRuns } from './extension.js';
+import { conversationTranscript, deleteConversation, getConversation, listConversations, loadExtensionRuns, mergeExtensionRuns } from './extension.js';
 import { cfg, currentContext, publicOrigin, runWithOrg } from './context.js';
 import {
   DRAFT_SYSTEM,
@@ -1380,9 +1380,44 @@ async function orgRoute(req, res, url, ctx) {
     return;
   }
 
+  // Conversations: the person's Brew chats and extension runs in one list, shared with the extension.
+  if (req.method === 'GET' && pathname === '/api/conversations') {
+    if (!ctx.user?.id) throw fail('Sign in to see your conversations.', 401);
+    sendJson(res, 200, { conversations: await listConversations(ctx.user.id) });
+    return;
+  }
+
+  const conversation = pathname.match(/^\/api\/conversations\/([\w-]{1,64})$/);
+  if (conversation && (req.method === 'GET' || req.method === 'DELETE')) {
+    if (!ctx.user?.id) throw fail('Sign in to see your conversations.', 401);
+    if (req.method === 'DELETE') {
+      await deleteConversation(ctx.user.id, conversation[1]);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    const found = await getConversation(ctx.user.id, conversation[1]);
+    if (!found) throw fail('That conversation is gone.', 404);
+    const { run, ...rest } = found;
+    sendJson(res, 200, { conversation: rest });
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/api/agent/message') {
-    if (busyOrgs.has(ctx.org.id)) throw fail('Brew is already working on a request for this organisation.', 409);
     const body = await readJsonBody(req);
+    // Signed-in people get their own conversations (chatId); a new one can start from another
+    // conversation's transcript (resumeFrom). Without a user, Brew keeps the organisation's shared chat.
+    const userId = ctx.user?.id || '';
+    const chatId = userId ? String(body.chatId || randomUUID()) : '';
+    if (chatId && !/^[\w-]{1,64}$/.test(chatId)) throw fail('Unknown conversation.');
+    if (body.chatId) {
+      // Only the person's own Brew chats continue in place; anything else starts a new chat from it.
+      const existing = await getConversation(userId, chatId);
+      if (existing && existing.source !== 'dashboard') throw fail('Continue that conversation as a new chat.', 409);
+    }
+    const busyKey = userId ? `${ctx.org.id}:${userId}` : ctx.org.id;
+    if (busyOrgs.has(busyKey)) throw fail(userId ? 'Brew is already working on one of your requests.' : 'Brew is already working on a request for this organisation.', 409);
+    const resumeFrom = userId && body.resumeFrom ? String(body.resumeFrom) : '';
+    const resume = resumeFrom && /^[\w-]{1,64}$/.test(resumeFrom) ? await conversationTranscript(userId, resumeFrom) : '';
     // The Grok/Claude/OpenAI tab the message was written in; omitted means the organisation's default.
     const provider = body.provider == null || body.provider === '' ? undefined : String(body.provider);
     if (provider !== undefined && !AGENT_PROVIDERS.includes(provider)) throw fail('Assistant must be grok, claude, or openai.');
@@ -1390,7 +1425,7 @@ async function orgRoute(req, res, url, ctx) {
     if (text.length > 8000) throw fail('That message is too long.');
     const mediaId = body.mediaId ? String(body.mediaId) : '';
     if (!text && !mediaId) throw fail('Write a message or attach a video.');
-    busyOrgs.add(ctx.org.id);
+    busyOrgs.add(busyKey);
     const controller = new AbortController();
     req.on('aborted', () => controller.abort());
     let started = false;
@@ -1407,6 +1442,7 @@ async function orgRoute(req, res, url, ctx) {
         'X-Accel-Buffering': 'no',
       });
       started = true;
+      if (chatId) send('chat', { id: chatId });
       // Proxies such as Cloudflare drop a response that stays silent for about 100 seconds; clip generation takes longer.
       heartbeat = setInterval(() => {
         if (!res.writableEnded) res.write(': keepalive\n\n');
@@ -1419,6 +1455,7 @@ async function orgRoute(req, res, url, ctx) {
         provider,
         send,
         signal: controller.signal,
+        chat: chatId ? { userId, id: chatId, resume } : undefined,
       });
       send('done', { ok: true });
     } catch (err) {
@@ -1426,7 +1463,7 @@ async function orgRoute(req, res, url, ctx) {
       send('error', { error: err.message || `${agentName(provider)} could not finish that.` });
     } finally {
       clearInterval(heartbeat);
-      busyOrgs.delete(ctx.org.id);
+      busyOrgs.delete(busyKey);
       if (started && !res.writableEnded) res.end();
     }
     return;

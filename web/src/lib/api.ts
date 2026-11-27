@@ -281,6 +281,28 @@ export type ChatItem = {
   at?: string
 }
 
+/** One entry in the person's conversation list, shared with the Chrome extension. */
+export type ConversationSummary = {
+  id: string
+  title: string
+  source: 'dashboard' | 'extension' | 'shared'
+  provider: string
+  status: 'running' | 'done' | 'stopped' | 'error'
+  createdAt: number
+  updatedAt: number
+  posts: number
+}
+
+export type Conversation = {
+  id: string
+  title: string
+  source: ConversationSummary['source']
+  provider?: string
+  /** True for the person's own Brew chats; anything else continues as a new chat seeded from it. */
+  continues: boolean
+  display: ChatItem[]
+}
+
 export type InstagramEvent = {
   id: string
   field: string
@@ -315,6 +337,7 @@ export function requestSignIn(): never {
 // What the pages read while signed out: an organisation with nothing set up or connected yet.
 const GUEST_READS: Record<string, unknown> = {
   '/api/agent/history': { display: [] },
+  '/api/conversations': { conversations: [] },
   '/api/youtube/videos': { videos: [] },
   '/api/hashnode/posts': { posts: [] },
   '/api/devto/posts': { posts: [] },

@@ -313,7 +313,7 @@ function HistoryView({ onOpen, onChanged }: { onOpen: (run: Run) => void; onChan
   useEffect(() => {
     refresh()
   }, [refresh])
-  if (!runs.length) return <p className="p-4 text-center text-muted-foreground">No runs yet.</p>
+  if (!runs.length) return <p className="p-4 text-center text-muted-foreground">No conversations yet.</p>
   return (
     <div className="space-y-2 p-3">
       {runs.map((run) => (
@@ -321,6 +321,7 @@ function HistoryView({ onOpen, onChanged }: { onOpen: (run: Run) => void; onChan
           <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(run)}>
             <p className="truncate font-medium">{run.title || 'Untitled'}</p>
             <p className="text-xs text-muted-foreground">
+              {run.source === 'dashboard' && <span className="mr-1 rounded bg-p1-soft px-1 py-px text-[10px] font-medium">Dashboard</span>}
               {new Date(run.updatedAt).toLocaleString()} · {providerInfo(run.provider).label}
               {run.posts.length ? ` · ${run.posts.length} posted` : ''}
             </p>
@@ -508,12 +509,19 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         const tab = await workTab()
         if (!tab?.id) throw new Error('Open a tab for the agent to work in.')
         if (runRef.current) {
-          // Continuing a chat from History: same run, a new conversation that starts from its transcript.
-          session.current = new AgentSession(settings, tab.id, runRef.current)
+          // Continuing a chat from History: a new conversation that starts from its transcript. Runs
+          // from here keep their id; a dashboard Brew chat continues as a new run of this extension.
+          const earlier = runRef.current
+          session.current = new AgentSession(settings, tab.id, earlier)
           setResumed(false)
+          if (earlier.source === 'dashboard') {
+            const fork: Run = { id: crypto.randomUUID(), title: earlier.title, source: 'extension', provider: settings.provider, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), steps: [...earlier.steps], posts: [] }
+            runRef.current = fork
+            setRun(fork)
+          }
         } else {
           session.current = new AgentSession(settings, tab.id)
-          const fresh: Run = { id: crypto.randomUUID(), title: text.slice(0, 80), provider: settings.provider, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), steps: [], posts: [] }
+          const fresh: Run = { id: crypto.randomUUID(), title: text.slice(0, 80), source: 'extension', provider: settings.provider, status: 'running', createdAt: Date.now(), updatedAt: Date.now(), steps: [], posts: [] }
           runRef.current = fresh
           setRun(fresh)
         }
@@ -715,7 +723,7 @@ export function App({ settings, setSettings }: { settings: Settings; setSettings
         <footer className="border-t border-border p-2">
           {resumed && (
             <p className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-              <History className="size-3" /> Continuing an earlier chat. Your next message picks up where it left off.
+              <History className="size-3" /> {run?.source === 'dashboard' ? 'A Brew chat from the dashboard. Your next message continues it here.' : 'Continuing an earlier chat. Your next message picks up where it left off.'}
               <button className="ml-auto underline" onClick={newChat}>
                 New chat
               </button>
