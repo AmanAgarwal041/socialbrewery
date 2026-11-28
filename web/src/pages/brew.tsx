@@ -42,6 +42,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { api, authedFetch, mediaSrc, readSse, safeLink, timeAgo, uploadMedia, type ChatItem, type Conversation, type ConversationSummary, type NetworkId } from '@/lib/api'
 import { useAssistant } from '@/lib/assistant'
 import { AssistantTabs } from '@/components/assistant-tabs'
+import { Markdown } from '@/components/markdown'
 import { useAppState } from '@/lib/app-state'
 import { NETWORKS, SLOT_CLASSES, networkById, type Slot } from '@/lib/networks'
 import { cn } from '@/lib/utils'
@@ -152,23 +153,6 @@ const SUGGESTIONS: { network: NetworkId | 'any'; title: string; prompt: string }
 
 const TARGET_PREFIX = /^\[(YouTube|LinkedIn|Instagram|X|Hashnode|DEV|Slack|Reddit)\]\s*/
 
-function Linkified({ text }: { text: string }) {
-  const parts = text.split(/(https?:\/\/[^\s)]+)/g)
-  return (
-    <>
-      {parts.map((part, index) =>
-        /^https?:\/\//.test(part) ? (
-          <a key={index} href={part} target="_blank" rel="noreferrer" className="font-medium underline decoration-p1 underline-offset-2 hover:decoration-2">
-            {part}
-          </a>
-        ) : (
-          <span key={index}>{part}</span>
-        ),
-      )}
-    </>
-  )
-}
-
 function Avatar() {
   return (
     <div className="bg-palette flex size-8 shrink-0 items-center justify-center rounded-xl text-ink shadow-sm">
@@ -221,8 +205,8 @@ function AssistantBubble({ item }: { item: ChatItem }) {
     <div className="flex gap-3">
       <Avatar />
       <div className="max-w-[85%] min-w-0">
-        <div className="rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap shadow-xs">
-          <Linkified text={item.content} />
+        <div className="rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-relaxed shadow-xs">
+          <Markdown text={item.content} />
         </div>
         {item.at && <span className="mt-1 block text-[11px] text-muted-foreground">{timeAgo(item.at)}</span>}
       </div>
@@ -252,9 +236,7 @@ function ToolCard({ item }: { item: ChatItem }) {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-muted-foreground">{meta.label}</p>
-            <p className={cn('text-sm whitespace-pre-wrap', item.error && 'text-destructive')}>
-              <Linkified text={item.content} />
-            </p>
+            <Markdown text={item.content} className={cn('text-sm', item.error && 'text-destructive')} media={!item.error} />
           </div>
           {link && (
             <Button asChild size="sm" variant="secondary" className="shrink-0">
@@ -496,9 +478,13 @@ export function BrewPage() {
     setConversations(data.conversations || [])
   }, [])
 
+  // setSearchParams changes identity whenever the URL does; keep this stable so opening a chat does not
+  // re-run the load effect below (which reopened the first chat).
+  const setSearchParamsRef = useRef(setSearchParams)
+  setSearchParamsRef.current = setSearchParams
   const setChatParam = useCallback(
     (id: string) =>
-      setSearchParams(
+      setSearchParamsRef.current(
         (prev) => {
           const next = new URLSearchParams(prev)
           if (id) next.set('chat', id)
@@ -507,12 +493,15 @@ export function BrewPage() {
         },
         { replace: true },
       ),
-    [setSearchParams],
+    [],
   )
 
+  const openTicket = useRef(0)
   const openConversation = useCallback(
     async (id: string, keepNote = false) => {
+      const ticket = ++openTicket.current
       const data = await api<{ conversation: Conversation }>(`/api/conversations/${encodeURIComponent(id)}`)
+      if (ticket !== openTicket.current) return
       setCurrent(data.conversation)
       setItems(data.conversation.display || [])
       if (!keepNote) setContinuedFrom('')
@@ -523,6 +512,7 @@ export function BrewPage() {
   )
 
   function newChat() {
+    openTicket.current++
     setCurrent(null)
     setItems([])
     setContinuedFrom('')
